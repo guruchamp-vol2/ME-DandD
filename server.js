@@ -5,8 +5,12 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
 import { MongoClient } from 'mongodb';
-import { RateLimiterMemory } from 'rate-limiter-flexible';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -15,29 +19,25 @@ const io = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } }
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
-// Serve index at root
-app.get('/', (req, res) => res.sendFile(process.cwd() + '/public/index.html'));
 
-// SPA fallback (optional, useful for client-side routing)
-app.get('*', (req, res) => res.sendFile(process.cwd() + '/public/index.html'));
-
+// Static + root
+app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
+app.get('/', (req,res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('*', (req,res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const PORT = process.env.PORT || 10000;
+
+// ---------------- Persistence (optional Mongo) ----------------
 const useMongo = !!process.env.MONGODB_URI;
 let mongoClient = null, db = null;
-
-// ---------------- Rate limiting ----------------
-const limiter = new RateLimiterMemory({ points: 20, duration: 3 });
-const limitSocket = async (socket, key='generic') => {
-  try { await limiter.consume(`${socket.handshake.address}:${key}`); }
-  catch { socket.emit('error_message', 'Rate limited—try again in a moment.'); throw new Error('rate'); }
-};
+async function persist(col, doc){ if (useMongo) await db.collection(col).insertOne(doc); }
+async function upsertLobbyMeta(name, changes){ if (useMongo) await db.collection('lobbies').updateOne({name},{ $set:{name, ...changes}}, {upsert:true}); }
 
 // ---------------- Helpers ----------------
 const nowISO = () => new Date().toISOString();
 const safe = (s, max=120) => String(s ?? '').trim().slice(0, max);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+const randId = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}`;
 
 const hashPass = (plain) => {
   const salt = crypto.randomBytes(16);
@@ -74,21 +74,17 @@ function rollAdvanced(exprRaw) {
 }
 
 // ---------------- State ----------------
-const memory = {
-  lobbies: new Map(),
-};
-
-/* Lobby structure:
-{
-  createdAt, gm, passwordHash?, bans:Set, users:Map<sid,{name}>
-  macros: Map<username, Map<macro,expr>>,
-  messages:[], rolls:[],
-  characters: Map<characterName, sheet>,
-  encounter: { active, order:[{name, init}], turnIndex },
-  map: { w, h, tiles: number[][] (0=open,1=wall), tokens: Record<id,{id,name,x,y,color,owner}> }
-}
-*/
+const memory = { lobbies: new Map() };
 const defaultMap = () => ({ w: 20, h: 20, tiles: Array.from({length:20}, () => Array(20).fill(0)), tokens: {} });
+const defaultCampaign = () => ({
+  title: 'Untitled Campaign',
+  summary: 'A new adventure begins...',
+  scenes: [], // {id,title,content,choices:[{id,text,to}]}
+  currentSceneId: null,
+  handouts: [], // {id,title,content}
+  quests: [], // {id,title,done}
+  notes: [] // {by,text,ts}
+});
 
 function ensureLobby(name) {
   if (!memory.lobbies.has(name)) {
@@ -104,14 +100,11 @@ function ensureLobby(name) {
       characters: new Map(),
       encounter: { active:false, order:[], turnIndex:0 },
       map: defaultMap(),
+      campaign: defaultCampaign(),
     });
   }
   return memory.lobbies.get(name);
 }
-
-// ---------------- Persistence helpers ----------------
-async function persist(col, doc){ if (useMongo) await db.collection(col).insertOne(doc); }
-async function upsertLobbyMeta(name, changes){ if (useMongo) await db.collection('lobbies').updateOne({name},{ $set:{name, ...changes}}, {upsert:true}); }
 
 // ---------------- REST ----------------
 app.get('/health', (req,res)=> res.json({ok:true, useMongo}));
@@ -135,14 +128,11 @@ io.on('connection', (socket)=>{
       users: [...L.users.values()].map(u=>u.name),
       gm: L.gm,
       characters: Object.fromEntries([...L.characters.entries()]),
-      encounter: L.encounter
+      encounter: L.encounter,
+      campaign: L.campaign
     });
   };
-  const emitMap = () => {
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    io.to(lobby).emit('map_state', L.map);
-  };
+  const emitMap = () => { if (!lobby) return; const L = ensureLobby(lobby); io.to(lobby).emit('map_state', L.map); };
   const joinOk = (L, name) => !L.bans.has((name||'').toLowerCase());
   const uniqueName = (L, base) => {
     let nm = base || 'Anon';
@@ -151,231 +141,275 @@ io.on('connection', (socket)=>{
     return `${base}${i}`;
   };
 
-  socket.on('identify', ({name})=>{
-    username = safe(name || 'Anon', 24);
-    socket.emit('identified', { username });
-  });
+  socket.on('identify', ({name})=>{ username = safe(name || 'Anon', 24); socket.emit('identified', { username }); });
 
   socket.on('join_lobby', async ({ lobby: lobbyName, password })=>{
-    try{
-      await limitSocket(socket,'join');
-      lobbyName = safe(lobbyName || 'tavern', 40) || 'tavern';
-      const L = ensureLobby(lobbyName);
-
-      if (!joinOk(L, username)) { socket.emit('error_message','You are banned from this lobby.'); return; }
-      if (L.passwordHash) {
-        if (!password || !verifyPass(password, L.passwordHash)) { socket.emit('error_message','Lobby is locked (wrong password).'); return; }
-      } else if (password) {
-        L.passwordHash = hashPass(password);
-        if (!L.gm) L.gm = username;
-        await upsertLobbyMeta(lobbyName, { password:true, gm:L.gm });
-      } else if (!L.gm) {
-        L.gm = username; // first-join GM
-      }
-
-      if (lobby) socket.leave(lobby);
-      lobby = lobbyName;
-      username = uniqueName(L, username);
-      L.users.set(socket.id, { name: username });
-      socket.join(lobby);
-
-      const history = { messages: L.messages.slice(-40), rolls: L.rolls.slice(-40) };
-      socket.emit('joined', { lobby, history, gm: L.gm });
-      io.to(lobby).emit('system', `${username} joined ${lobby}`);
-      emitState();
-      emitMap();
-      if (useMongo) await upsertLobbyMeta(lobby, { updatedAt: nowISO() });
-    }catch{}
+    lobbyName = safe(lobbyName || 'tavern', 40) || 'tavern';
+    const L = ensureLobby(lobbyName);
+    if (!joinOk(L, username)) { socket.emit('error_message','You are banned from this lobby.'); return; }
+    if (L.passwordHash) {
+      if (!password || !verifyPass(password, L.passwordHash)) { socket.emit('error_message','Lobby is locked (wrong password).'); return; }
+    } else if (password) {
+      L.passwordHash = hashPass(password);
+      if (!L.gm) L.gm = username;
+      await upsertLobbyMeta(lobbyName, { password:true, gm:L.gm });
+    } else if (!L.gm) {
+      L.gm = username; // first-join GM
+    }
+    if (lobby) socket.leave(lobby);
+    lobby = lobbyName;
+    username = uniqueName(L, username);
+    L.users.set(socket.id, { name: username });
+    socket.join(lobby);
+    const history = { messages: L.messages.slice(-40), rolls: L.rolls.slice(-40) };
+    socket.emit('joined', { lobby, history, gm: L.gm });
+    io.to(lobby).emit('system', `${username} joined ${lobby}`);
+    emitState(); emitMap();
   });
 
   // ---------- Chat & Roll ----------
   socket.on('chat', async ({text})=>{
-    try{
-      await limitSocket(socket,'chat');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const msg = safe(text, 500);
-      if (!msg) return;
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const msg = safe(text, 500);
+    if (!msg) return;
 
-      if (msg.startsWith('/')) { await handleCommand(L, msg); return; }
+    // Commands
+    if (msg.startsWith('/')) { await handleCommand(L, msg); return; }
 
-      const payload = { user: username, text: msg, ts: nowISO() };
-      io.to(lobby).emit('chat', payload);
-      L.messages.push(payload);
-      if (useMongo) await persist('messages', { lobby, ...payload });
-    }catch{}
+    const payload = { user: username, text: msg, ts: nowISO() };
+    io.to(lobby).emit('chat', payload);
+    L.messages.push(payload);
   });
 
   socket.on('roll', async ({expression})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
     try{
-      await limitSocket(socket,'roll');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const userMacros = L.macros.get(username) || new Map();
-      const expr = userMacros.get(safe(expression,50)) || expression || 'd20';
-      const res = rollAdvanced(expr);
+      const res = rollAdvanced(expression || 'd20');
       const payload = { user: username, ...res, ts: nowISO(), lobby };
       io.to(lobby).emit('roll', payload);
       L.rolls.push(payload);
-      if (useMongo) await persist('rolls', payload);
     }catch(e){ socket.emit('error_message', e.message || 'Bad dice expression.'); }
   });
 
-  // ---------- Character upsert/delete ----------
-  socket.on('character_upsert', async (sheet)=>{
-    try{
-      await limitSocket(socket,'char');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const isGM = L.gm === username;
-      const target = safe(sheet?.name || username, 24);
-      if (!isGM && target !== username) return;
-
-      const ab = sheet?.abilities || {};
-      const abilities = {
-        STR: clamp(parseInt(ab.STR || 8,10) || 8, 1, 30),
-        DEX: clamp(parseInt(ab.DEX || 8,10) || 8, 1, 30),
-        CON: clamp(parseInt(ab.CON || 8,10) || 8, 1, 30),
-        INT: clamp(parseInt(ab.INT || 8,10) || 8, 1, 30),
-        WIS: clamp(parseInt(ab.WIS || 8,10) || 8, 1, 30),
-        CHA: clamp(parseInt(ab.CHA || 8,10) || 8, 1, 30),
-      };
-      const sanitized = {
-        name: target,
-        archetype: safe(sheet.archetype, 20),
-        race: safe(sheet.race, 20),
-        speed: clamp(parseInt(sheet.speed || 30,10) || 30, 0, 120),
-        profs: safe(sheet.profs, 200),
-        traits: safe(sheet.traits, 800),
-        class: safe(sheet.class, 24),
-        level: clamp(parseInt(sheet.level || 1,10)||1, 1, 20),
-        ac: clamp(parseInt(sheet.ac || 10,10)||10, 1, 30),
-        hp: clamp(parseInt(sheet.hp || 10,10)||10, 0, 1000),
-        maxHp: clamp(parseInt(sheet.maxHp || 10,10)||10, 1, 1000),
-        notes: safe(sheet.notes, 2000),
-        abilities,
-        updatedAt: nowISO(),
-      };
-
-      L.characters.set(target, sanitized);
-      io.to(lobby).emit('system', `${username} updated ${target}'s sheet`);
-      io.to(lobby).emit('characters', Object.fromEntries([...L.characters.entries()]));
-      if (useMongo) await upsertLobbyMeta(lobby, { updatedAt: nowISO() });
-      emitState();
-    }catch{}
-  });
-
-  socket.on('character_delete', async ({name})=>{
-    try{
-      await limitSocket(socket,'char');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const target = safe(name || username, 24);
-      const isGM = L.gm === username;
-      if (!isGM && target !== username) return;
-      L.characters.delete(target);
-      io.to(lobby).emit('system', `${username} removed ${target}'s sheet`);
-      io.to(lobby).emit('characters', Object.fromEntries([...L.characters.entries()]));
-      emitState();
-    }catch{}
-  });
-
-  // ---------- Mini-map events ----------
-  socket.on('map_request', ()=> { if (lobby) emitMap(); });
-
-  socket.on('map_init', async ({w,h})=>{
-    try{
-      await limitSocket(socket,'map');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
-      w = clamp(parseInt(w||20,10)||20, 5, 60);
-      h = clamp(parseInt(h||20,10)||20, 5, 60);
-      L.map = { w, h, tiles: Array.from({length:h},()=>Array(w).fill(0)), tokens: {} };
-      io.to(lobby).emit('system', `Map set to ${w}×${h}`);
-      emitMap();
-    }catch{}
-  });
-
-  socket.on('map_set', async ({x,y,val})=>{
-    try{
-      await limitSocket(socket,'map');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
-      const {w,h} = L.map;
-      x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
-      L.map.tiles[y][x] = val ? 1 : 0;
-      emitMap();
-    }catch{}
-  });
-
-  socket.on('token_add', async ({id,name,color})=>{
-    try{
-      await limitSocket(socket,'map');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const {w,h} = L.map;
-      const tid = safe(id||`t_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, 40);
-      const nm = safe(name || username, 24);
-      let x=0,y=0;
-      outer: for (let yy=0; yy<h; yy++) for (let xx=0; xx<w; xx++) {
-        if (L.map.tiles[yy][xx]===0 && !Object.values(L.map.tokens).some(t=>t.x===xx&&t.y===yy)) { x=xx; y=yy; break outer; }
-      }
-      L.map.tokens[tid] = { id:tid, name:nm, x, y, color: safe(color||'#222', 16), owner: username };
-      emitMap();
-    }catch{}
-  });
-
-  socket.on('token_move', async ({id,x,y})=>{
-    try{
-      await limitSocket(socket,'map');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const tok = L.map.tokens?.[id];
-      if (!tok) return;
-      const isGM = L.gm === username;
-      if (!isGM && tok.owner !== username) { socket.emit('error_message','Only owner or GM can move this token.'); return; }
-      const {w,h,tiles} = L.map;
-      x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
-      if (tiles[y][x]===1) return; // wall
-      tok.x = x; tok.y = y;
-      emitMap();
-    }catch{}
-  });
-
-  socket.on('token_remove', async ({id})=>{
-    try{
-      await limitSocket(socket,'map');
-      if (!lobby) return;
-      const L = ensureLobby(lobby);
-      const tok = L.map.tokens?.[id];
-      if (!tok) return;
-      const isGM = L.gm === username;
-      if (!isGM && tok.owner !== username) return;
-      delete L.map.tokens[id];
-      emitMap();
-    }catch{}
-  });
-
-  socket.on('map_clear', async ()=>{
-    try{
-      await limitSocket(socket,'map');
+  // ---------- Characters ----------
+  socket.on('character_upsert', (sheet)=>{
     if (!lobby) return;
-      const L = ensureLobby(lobby);
-      if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
-      const {w,h} = L.map;
-      L.map.tiles = Array.from({length:h},()=>Array(w).fill(0));
-      emitMap();
-    }catch{}
+    const L = ensureLobby(lobby);
+    const isGM = L.gm === username;
+    const target = safe(sheet?.name || username, 24);
+    if (!isGM && target !== username) return;
+    const ab = sheet?.abilities || {};
+    const abilities = {
+      STR: clamp(parseInt(ab.STR || 8,10) || 8, 1, 30),
+      DEX: clamp(parseInt(ab.DEX || 8,10) || 8, 1, 30),
+      CON: clamp(parseInt(ab.CON || 8,10) || 8, 1, 30),
+      INT: clamp(parseInt(ab.INT || 8,10) || 8, 1, 30),
+      WIS: clamp(parseInt(ab.WIS || 8,10) || 8, 1, 30),
+      CHA: clamp(parseInt(ab.CHA || 8,10) || 8, 1, 30),
+    };
+    const sanitized = {
+      name: target,
+      archetype: safe(sheet.archetype, 20),
+      race: safe(sheet.race, 20),
+      speed: clamp(parseInt(sheet.speed || 30,10) || 30, 0, 120),
+      profs: safe(sheet.profs, 200),
+      traits: safe(sheet.traits, 800),
+      class: safe(sheet.class, 24),
+      level: clamp(parseInt(sheet.level || 1,10)||1, 1, 20),
+      ac: clamp(parseInt(sheet.ac || 10,10)||10, 1, 30),
+      hp: clamp(parseInt(sheet.hp || 10,10)||10, 0, 1000),
+      maxHp: clamp(parseInt(sheet.maxHp || 10,10)||10, 1, 1000),
+      notes: safe(sheet.notes, 2000),
+      abilities,
+      updatedAt: nowISO(),
+    };
+    L.characters.set(target, sanitized);
+    io.to(lobby).emit('system', `${username} updated ${target}'s sheet`);
+    io.to(lobby).emit('characters', Object.fromEntries([...L.characters.entries()]));
+    emitState();
+  });
+  socket.on('character_delete', ({name})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const target = safe(name || username, 24);
+    const isGM = L.gm === username;
+    if (!isGM && target !== username) return;
+    L.characters.delete(target);
+    io.to(lobby).emit('system', `${username} removed ${target}'s sheet`);
+    io.to(lobby).emit('characters', Object.fromEntries([...L.characters.entries()]));
+    emitState();
   });
 
+  // ---------- Map ----------
+  socket.on('map_request', ()=> { if (lobby) emitMap(); });
+  socket.on('map_init', ({w,h})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    w = clamp(parseInt(w||20,10)||20, 5, 60);
+    h = clamp(parseInt(h||20,10)||20, 5, 60);
+    L.map = { w, h, tiles: Array.from({length:h},()=>Array(w).fill(0)), tokens: {} };
+    io.to(lobby).emit('system', `Map set to ${w}×${h}`);
+    emitMap();
+  });
+  socket.on('map_set', ({x,y,val})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    const {w,h} = L.map;
+    x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
+    L.map.tiles[y][x] = val ? 1 : 0;
+    emitMap();
+  });
+  socket.on('token_add', ({id,name,color})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const {w,h} = L.map;
+    const tid = safe(id||`t_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, 40);
+    const nm = safe(name || username, 24);
+    let x=0,y=0;
+    outer: for (let yy=0; yy<h; yy++) for (let xx=0; xx<w; xx++) {
+      if (L.map.tiles[yy][xx]===0 && !Object.values(L.map.tokens).some(t=>t.x===xx&&t.y===yy)) { x=xx; y=yy; break outer; }
+    }
+    L.map.tokens[tid] = { id:tid, name:nm, x, y, color: safe(color||'#222', 16), owner: username };
+    emitMap();
+  });
+  socket.on('token_move', ({id,x,y})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const tok = L.map.tokens?.[id];
+    if (!tok) return;
+    const isGM = L.gm === username;
+    if (!isGM && tok.owner !== username) { socket.emit('error_message','Only owner or GM can move this token.'); return; }
+    const {w,h,tiles} = L.map;
+    x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
+    if (tiles[y][x]===1) return; // wall
+    tok.x = x; tok.y = y;
+    emitMap();
+  });
+  socket.on('token_remove', ({id})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const tok = L.map.tokens?.[id];
+    if (!tok) return;
+    const isGM = L.gm === username;
+    if (!isGM && tok.owner !== username) return;
+    delete L.map.tokens[id];
+    emitMap();
+  });
+  socket.on('map_clear', ()=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    const {w,h} = L.map;
+    L.map.tiles = Array.from({length:h},()=>Array(w).fill(0));
+    emitMap();
+  });
   socket.on('ping', ({x,y})=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     const {w,h} = L.map;
     x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
     io.to(lobby).emit('map_ping', { x, y, by: username, ts: nowISO() });
+  });
+
+  // ---------- Campaign / Story sockets ----------
+  socket.on('campaign_get', ()=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    socket.emit('campaign_state', L.campaign);
+  });
+
+  socket.on('campaign_update_meta', ({title, summary})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    if (title) L.campaign.title = safe(title, 120);
+    if (summary!=null) L.campaign.summary = safe(summary, 2000);
+    io.to(lobby).emit('campaign_state', L.campaign);
+  });
+
+  socket.on('campaign_scene_add', ({title, content})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    const scene = { id: randId('scn'), title: safe(title||'New Scene',120), content: safe(content||'', 4000), choices: [] };
+    L.campaign.scenes.push(scene);
+    if (!L.campaign.currentSceneId) L.campaign.currentSceneId = scene.id;
+    io.to(lobby).emit('campaign_state', L.campaign);
+  });
+
+  socket.on('campaign_scene_set', ({sceneId})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    if (L.campaign.scenes.some(s=>s.id===sceneId)){
+      L.campaign.currentSceneId = sceneId;
+      io.to(lobby).emit('system', `Scene changed to: ${sceneId}`);
+      io.to(lobby).emit('campaign_state', L.campaign);
+    }
+  });
+
+  socket.on('campaign_choice_add', ({sceneId, text, to})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    const scene = L.campaign.scenes.find(s=>s.id===sceneId);
+    if (!scene) return;
+    scene.choices.push({ id: randId('ch'), text: safe(text||'Choice', 200), to: safe(to||'', 120) });
+    io.to(lobby).emit('campaign_state', L.campaign);
+  });
+
+  socket.on('campaign_choice_pick', ({choiceId})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const scene = L.campaign.scenes.find(s=>s.id===L.campaign.currentSceneId);
+    if (!scene) return;
+    const choice = scene.choices.find(c=>c.id===choiceId);
+    if (choice && choice.to){
+      const target = L.campaign.scenes.find(s=>s.id===choice.to);
+      if (target){
+        L.campaign.currentSceneId = target.id;
+        io.to(lobby).emit('system', `${username} chose: ${choice.text}`);
+        io.to(lobby).emit('campaign_state', L.campaign);
+      }
+    }
+  });
+
+  socket.on('campaign_handout_add', ({title, content})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    L.campaign.handouts.push({ id: randId('hd'), title: safe(title||'Handout',120), content: safe(content||'', 4000) });
+    io.to(lobby).emit('campaign_state', L.campaign);
+  });
+
+  socket.on('campaign_quest_add', ({title})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    L.campaign.quests.push({ id: randId('q'), title: safe(title||'Quest', 200), done: false });
+    io.to(lobby).emit('campaign_state', L.campaign);
+  });
+  socket.on('campaign_quest_toggle', ({id})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const q = L.campaign.quests.find(q=>q.id===id);
+    if (!q) return;
+    if (L.gm !== username) { socket.emit('error_message','GM only.'); return; }
+    q.done = !q.done;
+    io.to(lobby).emit('campaign_state', L.campaign);
+  });
+
+  socket.on('campaign_note_add', ({text})=>{
+    if (!lobby) return;
+    const L = ensureLobby(lobby);
+    const t = safe(text, 1000);
+    if (!t) return;
+    L.campaign.notes.push({ by: username, text: t, ts: nowISO() });
+    io.to(lobby).emit('campaign_state', L.campaign);
   });
 
   // ---------- Commands ----------
@@ -389,8 +423,9 @@ io.on('connection', (socket)=>{
       case 'help':
         socket.emit('system',
           'Commands: /help, /me <action>, /w @name <msg>, /roll <expr>, /macro add name=expr | del name | list, ' +
-          '/setpass <pass> (GM on first set), /kick <name>, /ban <name>, /unban <name>, /gm <msg>, ' +
-          '/startencounter, /setinit <name> <n>, /next, /endencounter.  Map: use the Map tab (GM can draw).'
+          '/setpass <pass> (GM on first set), /kick <name> (GM), /ban <name> (GM), /unban <name> (GM), ' +
+          '/startencounter (GM), /setinit <name> <n> (GM), /next (GM), /endencounter (GM), ' +
+          'Campaign: /camp title <t> (GM), /camp summary <text> (GM), /scene add <title>|<content> (GM), /scene set <sceneId> (GM)'
         );
         break;
       case 'me': {
@@ -414,7 +449,6 @@ io.on('connection', (socket)=>{
         const payload = { user: username, ...res, ts: nowISO(), lobby };
         io.to(lobby).emit('roll', payload);
         L.rolls.push(payload);
-        if (useMongo) await persist('rolls', payload);
         break;
       }
       case 'macro': {
@@ -442,7 +476,6 @@ io.on('connection', (socket)=>{
         await upsertLobbyMeta(lobby, { password:true, gm:L.gm, updatedAt: nowISO() });
         send('Lobby password set/updated.'); emitState(); break;
       }
-      case 'gm': { if (!isGM) { socket.emit('error_message','GM only.'); break; } send(`[GM] ${argStr}`); break; }
       case 'kick': {
         if (!isGM) { socket.emit('error_message','GM only.'); break; }
         const target = safe(argStr,24);
@@ -456,6 +489,8 @@ io.on('connection', (socket)=>{
       }
       case 'ban':  { if (!isGM) { socket.emit('error_message','GM only.'); break; } L.bans.add(safe(argStr,24).toLowerCase()); send(`${argStr} is banned.`); emitState(); break; }
       case 'unban':{ if (!isGM) { socket.emit('error_message','GM only.'); break; } L.bans.delete(safe(argStr,24).toLowerCase()); send(`${argStr} is unbanned.`); emitState(); break; }
+
+      // Encounter
       case 'startencounter': { if (!isGM) { socket.emit('error_message','GM only.'); break; } L.encounter={active:true,order:[],turnIndex:0}; send('Encounter started. Use /setinit <name> <n>.'); emitState(); break; }
       case 'setinit': {
         if (!isGM) { socket.emit('error_message','GM only.'); break; }
@@ -473,6 +508,32 @@ io.on('connection', (socket)=>{
         send(`Turn: ${L.encounter.order[L.encounter.turnIndex].name}`); emitState(); break;
       }
       case 'endencounter': { if (!isGM) { socket.emit('error_message','GM only.'); break; } L.encounter={active:false,order:[],turnIndex:0}; send('Encounter ended.'); emitState(); break; }
+
+      // Campaign helpers
+      case 'camp': {
+        const m = argStr.match(/^(title|summary)\s+([\s\S]+)$/);
+        if (!m) { socket.emit('error_message','Usage: /camp title <text> | /camp summary <text>'); break; }
+        if (!isGM) { socket.emit('error_message','GM only.'); break; }
+        if (m[1]==='title') L.campaign.title = safe(m[2], 120);
+        if (m[1]==='summary') L.campaign.summary = safe(m[2], 2000);
+        send(`Campaign ${m[1]} updated.`); emitState(); break;
+      }
+      case 'scene': {
+        if (!isGM) { socket.emit('error_message','GM only.'); break; }
+        const mAdd = argStr.match(/^add\s+([^|]+)\|([\s\S]+)$/);
+        const mSet = argStr.match(/^set\s+(\S+)$/);
+        if (mAdd){
+          const scene = { id: randId('scn'), title: safe(mAdd[1],120), content: safe(mAdd[2], 4000), choices: [] };
+          L.campaign.scenes.push(scene);
+          if (!L.campaign.currentSceneId) L.campaign.currentSceneId = scene.id;
+          send(`Scene added: ${scene.title} (${scene.id})`); emitState();
+        } else if (mSet){
+          const id = mSet[1];
+          if (L.campaign.scenes.some(s=>s.id===id)){ L.campaign.currentSceneId = id; send(`Scene set: ${id}`); emitState(); }
+          else socket.emit('error_message','Scene not found.');
+        } else socket.emit('error_message','Use: /scene add <title>|<content> OR /scene set <sceneId>');
+        break;
+      }
       default: socket.emit('error_message','Unknown command. Try /help');
     }
   }
@@ -486,19 +547,4 @@ io.on('connection', (socket)=>{
   });
 });
 
-// ---------------- Start ----------------
-async function start(){
-  if (useMongo){
-    mongoClient = new MongoClient(process.env.MONGODB_URI, { maxPoolSize: 10 });
-    await mongoClient.connect();
-    db = mongoClient.db(process.env.MONGODB_DB || 'dnd');
-    await db.collection('lobbies').createIndex({ name: 1 }, { unique: true }).catch(()=>{});
-    await db.collection('messages').createIndex({ lobby: 1, ts: -1 });
-    await db.collection('rolls').createIndex({ lobby: 1, ts: -1 });
-    console.log('Connected to MongoDB');
-  } else {
-    console.log('Running with in-memory storage.');
-  }
-  server.listen(PORT, ()=> console.log(`Server on ${PORT}`));
-}
-start().catch(e=>{ console.error(e); process.exit(1); });
+server.listen(PORT, ()=> console.log(`Server on ${PORT}`));

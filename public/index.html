@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>D&D Lobbies — Custom + Map</title>
+    <title>D&D Lobbies — Campaign Mode</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -32,10 +32,11 @@
       #mapCanvas, #miniCanvas { touch-action: none; }
       #miniCanvas { width: 180px; height: 180px; border:1px solid #ddd; border-radius:8px; background:#fff; }
       .tool { padding:4px 8px; border-radius:8px; border:1px solid #ddd; background:#f6f6f6; }
+      .gm { background:#fff9e6; border:1px dashed #f1c40f; padding:10px; border-radius:12px; }
     </style>
   </head>
   <body>
-    <header><strong>D&D Lobbies</strong> <span class="small">custom characters + mini-map + dice</span></header>
+    <header><strong>D&D Lobbies</strong> <span class="small">campaigns + custom characters + mini-map + dice</span></header>
     <main>
       <section class="card">
         <h3>Lobby</h3>
@@ -47,7 +48,6 @@
         <hr/>
         <div><strong>Users</strong> <span id="gmBadge" class="pill">GM: —</span></div>
         <div id="users" class="small"></div>
-        <div class="small" style="margin-top:6px;">Type <code>/help</code> in chat • Examples: <code>/macro add fire=d20+5</code>, <code>/w @Ally hi</code></div>
       </section>
 
       <section class="card">
@@ -57,12 +57,77 @@
           <button class="tab-btn" data-tab="charsTab">Characters</button>
           <button class="tab-btn" data-tab="mapTab">Map</button>
           <button class="tab-btn" data-tab="encTab">Encounter</button>
+          <button class="tab-btn" data-tab="campTab">Campaign</button>
         </div>
 
         <div id="chatTab" class="panel active">
           <div id="log"></div>
           <div class="row" style="margin-top:10px;"><input id="msg" placeholder="Type message or /command..." /><button id="sendBtn">Send</button></div>
         </div>
+<div id="campTab" class="panel">
+  <h3>Campaign</h3>
+  <div id="campMeta"></div>
+  <div id="campScene"></div>
+  <div id="campChoices"></div>
+
+  <div class="row" style="margin-top:10px;">
+    <div class="card" style="width:100%">
+      <h4>Handouts</h4>
+      <ul id="handouts"></ul>
+    </div>
+    <div class="card" style="width:100%">
+      <h4>Quests</h4>
+      <ul id="quests"></ul>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:10px;">
+    <h4>Session Notes</h4>
+    <div id="notes"></div>
+    <div class="row" style="margin-top:6px;">
+      <input id="noteText" placeholder="Add a note..." style="flex:1;">
+      <button id="addNote">Add</button>
+    </div>
+  </div>
+
+  <div id="gmTools" class="gm" style="margin-top:10px; display:none;">
+    <h4>GM Tools</h4>
+    <div class="row">
+      <input id="campTitle" placeholder="Campaign Title" style="flex:1;">
+      <button id="saveCampMeta">Save Title</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <textarea id="campSummary" rows="2" placeholder="Campaign Summary" style="flex:1;"></textarea>
+      <button id="saveCampSummary">Save Summary</button>
+    </div>
+    <hr/>
+    <div class="row">
+      <input id="sceneTitle" placeholder="Scene title" style="flex:1;">
+      <input id="sceneContent" placeholder="Scene content" style="flex:1;">
+      <button id="addScene">Add Scene</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <input id="sceneIdSet" placeholder="Scene ID to set">
+      <button id="setScene">Set Current Scene</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <input id="choiceSceneId" placeholder="Scene ID">
+      <input id="choiceText" placeholder="Choice text">
+      <input id="choiceTo" placeholder="Goto Scene ID">
+      <button id="addChoice">Add Choice</button>
+    </div>
+    <hr/>
+    <div class="row">
+      <input id="handoutTitle" placeholder="Handout title" style="flex:1;">
+      <input id="handoutContent" placeholder="Handout content" style="flex:1;">
+      <button id="addHandout">Add Handout</button>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <input id="questTitle" placeholder="Quest title" style="flex:1;">
+      <button id="addQuest">Add Quest</button>
+    </div>
+  </div>
+</div>
 
         <div id="diceTab" class="panel">
           <div class="row"><input id="expr" placeholder="d20, 3d6+2, 4d6kh3, adv, dis..." /><button id="rollBtn">Roll</button></div>
@@ -140,9 +205,46 @@
           <table><thead><tr><th>#</th><th>Name</th><th>Init</th></tr></thead><tbody id="initTable"></tbody></table>
           <div class="row" style="margin-top:8px;"><input id="initName" placeholder="Name" /><input id="initVal" placeholder="Init" type="number" style="width:100px" /><button id="setInit">Set Init (GM)</button></div>
         </div>
+
+        <div id="campTab" class="panel">
+          <h3>Campaign</h3>
+          <div id="campMeta"></div>
+          <div id="campScene"></div>
+          <div id="campChoices"></div>
+
+          <div class="row" style="margin-top:10px;">
+            <div class="card" style="width:100%">
+              <h4>Handouts</h4>
+              <ul id="handouts"></ul>
+            </div>
+            <div class="card" style="width:100%">
+              <h4>Quests</h4>
+              <ul id="quests"></ul>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:10px;">
+            <h4>Session Notes</h4>
+            <div id="notes"></div>
+            <div class="row" style="margin-top:6px;"><input id="noteText" placeholder="Add a note..." style="flex:1;"><button id="addNote">Add</button></div>
+          </div>
+
+          <div id="gmTools" class="gm" style="margin-top:10px; display:none;">
+            <h4>GM Tools</h4>
+            <div class="row"><input id="campTitle" placeholder="Campaign Title" style="flex:1;"><button id="saveCampMeta">Save Title</button></div>
+            <div class="row" style="margin-top:6px;"><textarea id="campSummary" rows="2" placeholder="Campaign Summary" style="flex:1;"></textarea><button id="saveCampSummary">Save Summary</button></div>
+            <hr/>
+            <div class="row"><input id="sceneTitle" placeholder="Scene title" style="flex:1;"><input id="sceneContent" placeholder="Scene content" style="flex:1;"><button id="addScene">Add Scene</button></div>
+            <div class="row" style="margin-top:6px;"><input id="sceneIdSet" placeholder="Scene ID to set"><button id="setScene">Set Current Scene</button></div>
+            <div class="row" style="margin-top:6px;"><input id="choiceSceneId" placeholder="Scene ID"><input id="choiceText" placeholder="Choice text"><input id="choiceTo" placeholder="Goto Scene ID"><button id="addChoice">Add Choice</button></div>
+            <hr/>
+            <div class="row"><input id="handoutTitle" placeholder="Handout title" style="flex:1;"><input id="handoutContent" placeholder="Handout content" style="flex:1;"><button id="addHandout">Add Handout</button></div>
+            <div class="row" style="margin-top:6px;"><input id="questTitle" placeholder="Quest title" style="flex:1;"><button id="addQuest">Add Quest</button></div>
+          </div>
+        </div>
       </section>
     </main>
-    <footer>Join with a password to lock a lobby (first setter becomes GM). Mini-map syncs live.</footer>
+    <footer>Create a lobby with a password to become GM. Build your story with scenes, choices, handouts, and quests.</footer>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script src="/client.js"></script>
   </body>
