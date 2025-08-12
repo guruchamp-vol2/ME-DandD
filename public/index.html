@@ -1,8 +1,149 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>D&D Lobbies</title></head>
-<body>
-  <h1>D&D Lobbies</h1>
-  <p>If you see this on Render, static hosting works. The full UI is in your previous ZIP; replace this file with that index.html and client.js if needed.</p>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="/client.js"></script>
-</body></html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>D&D Lobbies — Custom + Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      body { margin: 0; display: grid; grid-template-rows: auto 1fr auto; height: 100vh; background:#f7f7f8; }
+      header, footer { padding: 10px 12px; background: #111; color: #eee; }
+      main { display: grid; grid-template-columns: 320px 1fr; gap: 10px; padding: 10px; }
+      .card { border: 1px solid #ddd; border-radius: 12px; padding: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04);}
+      #log { height: 40vh; overflow: auto; background: #fafafa; border: 1px solid #eee; padding: 8px; }
+      .sys { color: #666; font-style: italic; }
+      .chat { margin: 6px 0; }
+      .roll { margin: 6px 0; background: #f1f8ff; padding: 6px; border-radius: 6px; }
+      input, button, textarea, select { padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
+      button { cursor: pointer; }
+      .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      .tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+      .tab-btn { padding: 6px 10px; border-radius: 999px; border: 1px solid #ccc; background: #f5f5f5; }
+      .tab-btn.active { background: #111; color: #fff; }
+      .panel { display: none; }
+      .panel.active { display: block; }
+      .small { font-size: 12px; color: #666; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #eee; padding: 6px; text-align: left; }
+      ul { margin: 0; padding-left: 20px; max-height: 16vh; overflow: auto; }
+      code { background: #eee; padding: 2px 5px; border-radius: 6px; }
+      .pill { display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; margin:2px; }
+      #mapCanvas { width: 100%; height: 520px; border:1px solid #ddd; border-radius:12px; background:#fff; image-rendering: pixelated; }
+      #mapCanvas, #miniCanvas { touch-action: none; }
+      #miniCanvas { width: 180px; height: 180px; border:1px solid #ddd; border-radius:8px; background:#fff; }
+      .tool { padding:4px 8px; border-radius:8px; border:1px solid #ddd; background:#f6f6f6; }
+    </style>
+  </head>
+  <body>
+    <header><strong>D&D Lobbies</strong> <span class="small">custom characters + mini-map + dice</span></header>
+    <main>
+      <section class="card">
+        <h3>Lobby</h3>
+        <div class="row"><input id="name" placeholder="Your name" maxlength="24" /></div>
+        <div class="row" style="margin-top:6px;"><input id="lobby" placeholder="Lobby name (e.g. tavern)" maxlength="40" /></div>
+        <div class="row" style="margin-top:6px;"><input id="password" placeholder="(optional) lobby password" /><button id="joinBtn">Join</button></div>
+        <div class="row" style="margin-top:6px;"><button id="listBtn">List Lobbies</button></div>
+        <ul id="lobbies"></ul>
+        <hr/>
+        <div><strong>Users</strong> <span id="gmBadge" class="pill">GM: —</span></div>
+        <div id="users" class="small"></div>
+        <div class="small" style="margin-top:6px;">Type <code>/help</code> in chat • Examples: <code>/macro add fire=d20+5</code>, <code>/w @Ally hi</code></div>
+      </section>
+
+      <section class="card">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="chatTab">Chat</button>
+          <button class="tab-btn" data-tab="diceTab">Dice</button>
+          <button class="tab-btn" data-tab="charsTab">Characters</button>
+          <button class="tab-btn" data-tab="mapTab">Map</button>
+          <button class="tab-btn" data-tab="encTab">Encounter</button>
+        </div>
+
+        <div id="chatTab" class="panel active">
+          <div id="log"></div>
+          <div class="row" style="margin-top:10px;"><input id="msg" placeholder="Type message or /command..." /><button id="sendBtn">Send</button></div>
+        </div>
+
+        <div id="diceTab" class="panel">
+          <div class="row"><input id="expr" placeholder="d20, 3d6+2, 4d6kh3, adv, dis..." /><button id="rollBtn">Roll</button></div>
+          <div class="small" style="margin-top:6px;">Keep highest/lowest: <code>4d6kh3</code>, <code>4d6kl3</code>. Advantage: <code>adv</code>.</div>
+        </div>
+
+        <div id="charsTab" class="panel">
+          <h3>Create / Edit Character</h3>
+          <div class="row">
+            <input id="c_name" placeholder="Character name (defaults to your user)" />
+            <select id="c_archetype">
+              <option value="">(Preset)</option>
+              <option>Warrior</option><option>Rogue</option><option>Wizard</option><option>Cleric</option>
+            </select>
+            <select id="c_race">
+              <option>Human</option><option>Elf</option><option>Dwarf</option><option>Halfling</option>
+            </select>
+            <input id="c_class" placeholder="Class (optional)" />
+            <input id="c_level" type="number" min="1" max="20" value="1" style="width:80px" />
+            <input id="c_ac" type="number" min="1" max="30" value="10" style="width:70px" />
+            <input id="c_hp" type="number" min="0" max="1000" value="10" style="width:90px" />
+            <input id="c_maxHp" type="number" min="1" max="1000" value="10" style="width:90px" />
+          </div>
+          <div class="row">
+            <div class="small">Point-buy (27 points). Costs: 8→13:1/pt, 13→14:+2, 14→15:+2.</div>
+          </div>
+          <div class="row">
+            <label>STR <input id="ab_STR" type="number" min="8" max="15" value="8" style="width:60px"></label>
+            <label>DEX <input id="ab_DEX" type="number" min="8" max="15" value="8" style="width:60px"></label>
+            <label>CON <input id="ab_CON" type="number" min="8" max="15" value="8" style="width:60px"></label>
+            <label>INT <input id="ab_INT" type="number" min="8" max="15" value="8" style="width:60px"></label>
+            <label>WIS <input id="ab_WIS" type="number" min="8" max="15" value="8" style="width:60px"></label>
+            <label>CHA <input id="ab_CHA" type="number" min="8" max="15" value="8" style="width:60px"></label>
+            <span class="pill" id="pointsLeft">Points left: 27</span>
+          </div>
+          <div class="row">
+            <input id="c_speed" type="number" min="0" max="120" value="30" style="width:100px" placeholder="Speed" />
+            <input id="c_profs" placeholder="Proficiencies (comma-sep)" style="flex:1" />
+          </div>
+          <div class="row" style="margin-top:6px;"><textarea id="c_traits" rows="2" style="width:100%;" placeholder="Traits & features (auto adds race/archetype tips)"></textarea></div>
+          <div class="row" style="margin-top:6px;"><textarea id="c_notes" rows="4" style="width:100%;" placeholder="Notes, inventory..."></textarea></div>
+          <div class="row" style="margin-top:6px;"><button id="saveChar">Save / Update</button><button id="deleteChar">Delete</button></div>
+
+          <h4 style="margin-top:12px;">All Characters</h4>
+          <table>
+            <thead><tr><th>Name</th><th>Race</th><th>Archetype</th><th>Lvl</th><th>AC</th><th>HP</th><th>Abilities</th></tr></thead>
+            <tbody id="charsTable"></tbody>
+          </table>
+        </div>
+
+        <div id="mapTab" class="panel">
+          <div class="row">
+            <button class="tool" id="gmSetMap">Set Map Size (GM)</button>
+            <input class="tool" id="mapW" type="number" value="20" min="5" max="60" style="width:90px">
+            <input class="tool" id="mapH" type="number" value="20" min="5" max="60" style="width:90px">
+            <button class="tool" id="gmClear">Clear Walls (GM)</button>
+            <label class="tool">Draw Walls <input type="checkbox" id="drawWalls"></label>
+            <label class="tool">Erase <input type="checkbox" id="eraseWalls"></label>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <button class="tool" id="addToken">Add My Token</button>
+            <input class="tool" id="tokenName" placeholder="Token name" style="width:160px">
+            <input class="tool" id="tokenColor" type="color" value="#222222" style="width:60px; padding:2px;">
+            <button class="tool" id="removeToken">Remove Selected</button>
+            <button class="tool" id="pingBtn">Ping</button>
+            <canvas id="miniCanvas" width="180" height="180"></canvas>
+          </div>
+          <canvas id="mapCanvas" width="800" height="520"></canvas>
+          <div class="small" style="margin-top:6px;">Tip: GM toggles walls; players can drag their tokens. Click a tile then “Ping”.</div>
+        </div>
+
+        <div id="encTab" class="panel">
+          <div class="row"><button id="encStart">Start Encounter (GM)</button><button id="encNext">Next Turn (GM)</button><button id="encEnd">End Encounter (GM)</button></div>
+          <h4 style="margin-top:10px;">Initiative Order</h4>
+          <table><thead><tr><th>#</th><th>Name</th><th>Init</th></tr></thead><tbody id="initTable"></tbody></table>
+          <div class="row" style="margin-top:8px;"><input id="initName" placeholder="Name" /><input id="initVal" placeholder="Init" type="number" style="width:100px" /><button id="setInit">Set Init (GM)</button></div>
+        </div>
+      </section>
+    </main>
+    <footer>Join with a password to lock a lobby (first setter becomes GM). Mini-map syncs live.</footer>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="/client.js"></script>
+  </body>
+</html>

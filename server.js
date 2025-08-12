@@ -16,6 +16,12 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+// Serve index at root
+app.get('/', (req, res) => res.sendFile(process.cwd() + '/public/index.html'));
+
+// SPA fallback (optional, useful for client-side routing)
+app.get('*', (req, res) => res.sendFile(process.cwd() + '/public/index.html'));
+
 
 const PORT = process.env.PORT || 10000;
 const useMongo = !!process.env.MONGODB_URI;
