@@ -321,3 +321,128 @@ socket.on('map_ping', ({x,y,by})=>{
 // Initial draw
 resizeCells(); drawMap();
 window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
+/* ---------------- Campaign / Story Mode (add-on) ---------------- */
+
+// If your tabs system exists already, this will enable a new tab button with data-tab="campTab"
+// and a panel with id="campTab". It gracefully no-ops if the elements aren't present.
+function $(id){ return document.getElementById(id); } // no-op if you already have $, safe to re-declare
+
+// UI helpers (re-use your existing ones if present)
+function _escape(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;')
+  .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
+
+function ensureCampaignUI() {
+  // Bail if the page doesn't have the Campaign panel yet
+  if ($('campTab')) return true;
+  return false;
+}
+
+// Render
+function renderCampaignState(c){
+  if (!ensureCampaignUI()) return;
+
+  $('campMeta').innerHTML =
+    `<h3>${_escape(c.title || 'Untitled Campaign')}</h3><p class="small">${_escape(c.summary || '')}</p>`;
+
+  const current = (c.scenes || []).find(s => s.id === c.currentSceneId);
+  $('campScene').innerHTML = current
+    ? `<h4>${_escape(current.title)}</h4><p>${_escape(current.content || '')}</p>
+       <div class="small">Scene ID: <code>${_escape(current.id)}</code></div>`
+    : `<em>No scene selected</em>`;
+
+  const choicesEl = $('campChoices'); choicesEl.innerHTML = '';
+  (current?.choices || []).forEach(ch => {
+    const btn = document.createElement('button');
+    btn.className = 'tool';
+    btn.textContent = ch.text;
+    btn.onclick = () => socket.emit('campaign_choice_pick', { choiceId: ch.id });
+    choicesEl.appendChild(btn);
+  });
+
+  $('handouts').innerHTML = (c.handouts || [])
+    .map(h => `<li><strong>${_escape(h.title)}</strong>: ${_escape(h.content)}</li>`).join('');
+
+  $('quests').innerHTML   = (c.quests || [])
+    .map(q => `<li>${q.done ? '✅' : '⬜️'} ${_escape(q.title)} <small><code>${_escape(q.id)}</code></small></li>`)
+    .join('');
+
+  $('notes').innerHTML    = (c.notes || [])
+    .map(n => `<div class="small"><strong>${_escape(n.by)}</strong>: ${_escape(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`)
+    .join('');
+
+  // simple GM check: show tools if your GM badge contains your own name
+  const myNameGuess = document.querySelector('#users .pill')?.textContent?.replace(/^@/, '') || '';
+  const gmText = document.getElementById('gmBadge')?.textContent || '';
+  const isGM = gmText.includes(myNameGuess) || gmText.includes('You') || gmText.includes('(you)');
+  const tools = $('gmTools'); if (tools) tools.style.display = isGM ? 'block' : 'none';
+}
+
+// Socket listeners (non-destructive)
+socket.on?.('campaign_state', (c) => renderCampaignState(c));
+
+// Ask for campaign on join (if your existing 'joined' listener exists,
+// this adds an extra request; harmless if duplicated)
+socket.emit?.('campaign_get');
+
+// Wire GM Tool buttons if present
+function wireCampaignButtons(){
+  if (!ensureCampaignUI()) return;
+
+  const byId = (i) => document.getElementById(i);
+
+  byId('addNote')?.addEventListener('click', ()=>{
+    const t = byId('noteText').value.trim(); if (!t) return;
+    socket.emit('campaign_note_add', { text: t });
+    byId('noteText').value = '';
+  });
+
+  byId('saveCampMeta')?.addEventListener('click', ()=>{
+    const title = byId('campTitle').value.trim();
+    if (title) socket.emit('campaign_update_meta', { title });
+  });
+
+  byId('saveCampSummary')?.addEventListener('click', ()=>{
+    socket.emit('campaign_update_meta', { summary: byId('campSummary').value });
+  });
+
+  byId('addScene')?.addEventListener('click', ()=>{
+    socket.emit('campaign_scene_add', {
+      title: byId('sceneTitle').value.trim() || 'New Scene',
+      content: byId('sceneContent').value || ''
+    });
+  });
+
+  byId('setScene')?.addEventListener('click', ()=>{
+    const id = byId('sceneIdSet').value.trim();
+    if (id) socket.emit('campaign_scene_set', { sceneId: id });
+  });
+
+  byId('addChoice')?.addEventListener('click', ()=>{
+    socket.emit('campaign_choice_add', {
+      sceneId: byId('choiceSceneId').value.trim(),
+      text:    byId('choiceText').value.trim() || 'Choice',
+      to:      byId('choiceTo').value.trim()
+    });
+  });
+
+  byId('addHandout')?.addEventListener('click', ()=>{
+    socket.emit('campaign_handout_add', {
+      title:   byId('handoutTitle').value.trim() || 'Handout',
+      content: byId('handoutContent').value || ''
+    });
+  });
+
+  byId('addQuest')?.addEventListener('click', ()=>{
+    const t = byId('questTitle').value.trim(); if (!t) return;
+    socket.emit('campaign_quest_add', { title: t });
+  });
+}
+
+// Try to wire now and also after DOMContentLoaded
+wireCampaignButtons();
+document.addEventListener('DOMContentLoaded', wireCampaignButtons);
+
+// If your code emits a 'state' event already, append render here too (non-destructive)
+socket.on?.('state', (state)=>{
+  if (state?.campaign) renderCampaignState(state.campaign);
+});
