@@ -1,0 +1,19 @@
+{
+  "name": "dnd-lobbies-pro",
+  "version": "1.0.0",
+  "description": "D&D realtime lobbies with chat, dice, character customization, and a mini-map (Render-ready)",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "mongodb": "^6.8.0",
+    "rate-limiter-flexible": "^5.0.0",
+    "socket.io": "^4.7.5"
+  }
+}
