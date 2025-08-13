@@ -1,251 +1,322 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>D&D Lobbies — Campaign Mode</title>
+    <title>D&D Lobbies</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-      body { margin: 0; display: grid; grid-template-rows: auto 1fr auto; height: 100vh; background:#f7f7f8; }
-      header, footer { padding: 10px 12px; background: #111; color: #eee; }
-      main { display: grid; grid-template-columns: 320px 1fr; gap: 10px; padding: 10px; }
-      .card { border: 1px solid #ddd; border-radius: 12px; padding: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04);}
-      #log { height: 40vh; overflow: auto; background: #fafafa; border: 1px solid #eee; padding: 8px; }
-      .sys { color: #666; font-style: italic; }
-      .chat { margin: 6px 0; }
-      .roll { margin: 6px 0; background: #f1f8ff; padding: 6px; border-radius: 6px; }
-      input, button, textarea, select { padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
-      button { cursor: pointer; }
-      .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-      .tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-      .tab-btn { padding: 6px 10px; border-radius: 999px; border: 1px solid #ccc; background: #f5f5f5; }
-      .tab-btn.active { background: #111; color: #fff; }
-      .panel { display: none; }
-      .panel.active { display: block; }
-      .small { font-size: 12px; color: #666; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border-bottom: 1px solid #eee; padding: 6px; text-align: left; }
-      ul { margin: 0; padding-left: 20px; max-height: 16vh; overflow: auto; }
-      code { background: #eee; padding: 2px 5px; border-radius: 6px; }
-      .pill { display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; margin:2px; }
-      #mapCanvas { width: 100%; height: 520px; border:1px solid #ddd; border-radius:12px; background:#fff; image-rendering: pixelated; }
-      #mapCanvas, #miniCanvas { touch-action: none; }
-      #miniCanvas { width: 180px; height: 180px; border:1px solid #ddd; border-radius:8px; background:#fff; }
-      .tool { padding:4px 8px; border-radius:8px; border:1px solid #ddd; background:#f6f6f6; }
-      .gm { background:#fff9e6; border:1px dashed #f1c40f; padding:10px; border-radius:12px; }
-    </style>
+    <!-- Styles -->
+    <link rel="stylesheet" href="/styles.css" />
+    <!-- Socket.io (needed by client.js) -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   </head>
   <body>
-    <header><strong>D&D Lobbies</strong> <span class="small">campaigns + custom characters + mini-map + dice</span></header>
-    <main>
-      <section class="card">
-        <h3>Lobby</h3>
-        <div class="row"><input id="name" placeholder="Your name" maxlength="24" /></div>
-        <div class="row" style="margin-top:6px;"><input id="lobby" placeholder="Lobby name (e.g. tavern)" maxlength="40" /></div>
-        <div class="row" style="margin-top:6px;"><input id="password" placeholder="(optional) lobby password" /><button id="joinBtn">Join</button></div>
-        <div class="row" style="margin-top:6px;"><button id="listBtn">List Lobbies</button></div>
-        <ul id="lobbies"></ul>
-        <hr/>
-        <div><strong>Users</strong> <span id="gmBadge" class="pill">GM: —</span></div>
-        <div id="users" class="small"></div>
-      </section>
+    <!-- App chrome -->
+    <header class="appbar">
+      <div class="brand">
+        <div class="d20">20</div>
+        <div>
+          <div class="title">D&D Lobbies</div>
+          <div class="subtitle">chat • dice • characters • mini-map • encounter • campaign</div>
+        </div>
+      </div>
 
-      <section class="card">
-        <div class="tabs">
+      <div class="appbar-actions">
+        <button id="themeToggle" class="btn icon" aria-label="Toggle theme" title="Toggle theme">
+          <svg viewBox="0 0 24 24" class="icon-sun"><path d="M12 4V2m0 20v-2M4 12H2m20 0h-2M5.64 5.64 4.22 4.22m15.56 15.56-1.42-1.42M18.36 5.64 19.78 4.22M4.22 19.78l1.42-1.42" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+          <svg viewBox="0 0 24 24" class="icon-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79Z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+        </button>
+        <a class="btn ghost" href="https://5e.tools/" target="_blank" rel="noopener">Rules</a>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- Sidebar: Lobby + Users -->
+      <aside class="panel glass">
+        <h3 class="panel-title">Lobby</h3>
+        <div class="vstack gap-8">
+          <label class="field">
+            <span>Your name</span>
+            <input id="name" maxlength="24" placeholder="e.g. Aelar" />
+          </label>
+          <label class="field">
+            <span>Lobby name</span>
+            <input id="lobby" maxlength="40" placeholder="e.g. tavern" />
+          </label>
+          <div class="hstack gap-8">
+            <input id="password" class="grow" placeholder="(optional) password" />
+            <button id="joinBtn" class="btn primary">Join</button>
+          </div>
+          <button id="listBtn" class="btn ghost">List Lobbies</button>
+          <ul id="lobbies" class="list"></ul>
+
+          <div class="divider"></div>
+
+          <div class="hstack space-between center">
+            <h4 class="muted">Players</h4>
+            <span id="gmBadge" class="chip">GM: —</span>
+          </div>
+          <div id="users" class="userbar"></div>
+        </div>
+      </aside>
+
+      <!-- Main: Tabs + Content -->
+      <section class="main glass">
+        <nav class="tabs">
           <button class="tab-btn active" data-tab="chatTab">Chat</button>
           <button class="tab-btn" data-tab="diceTab">Dice</button>
           <button class="tab-btn" data-tab="charsTab">Characters</button>
           <button class="tab-btn" data-tab="mapTab">Map</button>
           <button class="tab-btn" data-tab="encTab">Encounter</button>
           <button class="tab-btn" data-tab="campTab">Campaign</button>
+        </nav>
+
+        <!-- Chat -->
+        <div id="chatTab" class="panel-body active">
+          <div id="log" class="log"></div>
+          <div class="composer">
+            <input id="msg" placeholder="Type message or /command…" />
+            <button id="sendBtn" class="btn primary">Send</button>
+          </div>
+          <div class="hint">Tips: <code>/help</code>, <code>/w @name hello</code>, <code>/roll 4d6kh3</code></div>
         </div>
 
-        <div id="chatTab" class="panel active">
-          <div id="log"></div>
-          <div class="row" style="margin-top:10px;"><input id="msg" placeholder="Type message or /command..." /><button id="sendBtn">Send</button></div>
-        </div>
-<div id="campTab" class="panel">
-  <h3>Campaign</h3>
-  <div id="campMeta"></div>
-  <div id="campScene"></div>
-  <div id="campChoices"></div>
-
-  <div class="row" style="margin-top:10px;">
-    <div class="card" style="width:100%">
-      <h4>Handouts</h4>
-      <ul id="handouts"></ul>
-    </div>
-    <div class="card" style="width:100%">
-      <h4>Quests</h4>
-      <ul id="quests"></ul>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:10px;">
-    <h4>Session Notes</h4>
-    <div id="notes"></div>
-    <div class="row" style="margin-top:6px;">
-      <input id="noteText" placeholder="Add a note..." style="flex:1;">
-      <button id="addNote">Add</button>
-    </div>
-  </div>
-
-  <div id="gmTools" class="gm" style="margin-top:10px; display:none;">
-    <h4>GM Tools</h4>
-    <div class="row">
-      <input id="campTitle" placeholder="Campaign Title" style="flex:1;">
-      <button id="saveCampMeta">Save Title</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <textarea id="campSummary" rows="2" placeholder="Campaign Summary" style="flex:1;"></textarea>
-      <button id="saveCampSummary">Save Summary</button>
-    </div>
-    <hr/>
-    <div class="row">
-      <input id="sceneTitle" placeholder="Scene title" style="flex:1;">
-      <input id="sceneContent" placeholder="Scene content" style="flex:1;">
-      <button id="addScene">Add Scene</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <input id="sceneIdSet" placeholder="Scene ID to set">
-      <button id="setScene">Set Current Scene</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <input id="choiceSceneId" placeholder="Scene ID">
-      <input id="choiceText" placeholder="Choice text">
-      <input id="choiceTo" placeholder="Goto Scene ID">
-      <button id="addChoice">Add Choice</button>
-    </div>
-    <hr/>
-    <div class="row">
-      <input id="handoutTitle" placeholder="Handout title" style="flex:1;">
-      <input id="handoutContent" placeholder="Handout content" style="flex:1;">
-      <button id="addHandout">Add Handout</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <input id="questTitle" placeholder="Quest title" style="flex:1;">
-      <button id="addQuest">Add Quest</button>
-    </div>
-  </div>
-</div>
-
-        <div id="diceTab" class="panel">
-          <div class="row"><input id="expr" placeholder="d20, 3d6+2, 4d6kh3, adv, dis..." /><button id="rollBtn">Roll</button></div>
-          <div class="small" style="margin-top:6px;">Keep highest/lowest: <code>4d6kh3</code>, <code>4d6kl3</code>. Advantage: <code>adv</code>.</div>
-        </div>
-
-        <div id="charsTab" class="panel">
-          <h3>Create / Edit Character</h3>
-          <div class="row">
-            <input id="c_name" placeholder="Character name (defaults to your user)" />
-            <select id="c_archetype">
-              <option value="">(Preset)</option>
-              <option>Warrior</option><option>Rogue</option><option>Wizard</option><option>Cleric</option>
-            </select>
-            <select id="c_race">
-              <option>Human</option><option>Elf</option><option>Dwarf</option><option>Halfling</option>
-            </select>
-            <input id="c_class" placeholder="Class (optional)" />
-            <input id="c_level" type="number" min="1" max="20" value="1" style="width:80px" />
-            <input id="c_ac" type="number" min="1" max="30" value="10" style="width:70px" />
-            <input id="c_hp" type="number" min="0" max="1000" value="10" style="width:90px" />
-            <input id="c_maxHp" type="number" min="1" max="1000" value="10" style="width:90px" />
-          </div>
-          <div class="row">
-            <div class="small">Point-buy (27 points). Costs: 8→13:1/pt, 13→14:+2, 14→15:+2.</div>
-          </div>
-          <div class="row">
-            <label>STR <input id="ab_STR" type="number" min="8" max="15" value="8" style="width:60px"></label>
-            <label>DEX <input id="ab_DEX" type="number" min="8" max="15" value="8" style="width:60px"></label>
-            <label>CON <input id="ab_CON" type="number" min="8" max="15" value="8" style="width:60px"></label>
-            <label>INT <input id="ab_INT" type="number" min="8" max="15" value="8" style="width:60px"></label>
-            <label>WIS <input id="ab_WIS" type="number" min="8" max="15" value="8" style="width:60px"></label>
-            <label>CHA <input id="ab_CHA" type="number" min="8" max="15" value="8" style="width:60px"></label>
-            <span class="pill" id="pointsLeft">Points left: 27</span>
-          </div>
-          <div class="row">
-            <input id="c_speed" type="number" min="0" max="120" value="30" style="width:100px" placeholder="Speed" />
-            <input id="c_profs" placeholder="Proficiencies (comma-sep)" style="flex:1" />
-          </div>
-          <div class="row" style="margin-top:6px;"><textarea id="c_traits" rows="2" style="width:100%;" placeholder="Traits & features (auto adds race/archetype tips)"></textarea></div>
-          <div class="row" style="margin-top:6px;"><textarea id="c_notes" rows="4" style="width:100%;" placeholder="Notes, inventory..."></textarea></div>
-          <div class="row" style="margin-top:6px;"><button id="saveChar">Save / Update</button><button id="deleteChar">Delete</button></div>
-
-          <h4 style="margin-top:12px;">All Characters</h4>
-          <table>
-            <thead><tr><th>Name</th><th>Race</th><th>Archetype</th><th>Lvl</th><th>AC</th><th>HP</th><th>Abilities</th></tr></thead>
-            <tbody id="charsTable"></tbody>
-          </table>
-        </div>
-
-        <div id="mapTab" class="panel">
-          <div class="row">
-            <button class="tool" id="gmSetMap">Set Map Size (GM)</button>
-            <input class="tool" id="mapW" type="number" value="20" min="5" max="60" style="width:90px">
-            <input class="tool" id="mapH" type="number" value="20" min="5" max="60" style="width:90px">
-            <button class="tool" id="gmClear">Clear Walls (GM)</button>
-            <label class="tool">Draw Walls <input type="checkbox" id="drawWalls"></label>
-            <label class="tool">Erase <input type="checkbox" id="eraseWalls"></label>
-          </div>
-          <div class="row" style="margin-top:6px;">
-            <button class="tool" id="addToken">Add My Token</button>
-            <input class="tool" id="tokenName" placeholder="Token name" style="width:160px">
-            <input class="tool" id="tokenColor" type="color" value="#222222" style="width:60px; padding:2px;">
-            <button class="tool" id="removeToken">Remove Selected</button>
-            <button class="tool" id="pingBtn">Ping</button>
-            <canvas id="miniCanvas" width="180" height="180"></canvas>
-          </div>
-          <canvas id="mapCanvas" width="800" height="520"></canvas>
-          <div class="small" style="margin-top:6px;">Tip: GM toggles walls; players can drag their tokens. Click a tile then “Ping”.</div>
-        </div>
-
-        <div id="encTab" class="panel">
-          <div class="row"><button id="encStart">Start Encounter (GM)</button><button id="encNext">Next Turn (GM)</button><button id="encEnd">End Encounter (GM)</button></div>
-          <h4 style="margin-top:10px;">Initiative Order</h4>
-          <table><thead><tr><th>#</th><th>Name</th><th>Init</th></tr></thead><tbody id="initTable"></tbody></table>
-          <div class="row" style="margin-top:8px;"><input id="initName" placeholder="Name" /><input id="initVal" placeholder="Init" type="number" style="width:100px" /><button id="setInit">Set Init (GM)</button></div>
-        </div>
-
-        <div id="campTab" class="panel">
-          <h3>Campaign</h3>
-          <div id="campMeta"></div>
-          <div id="campScene"></div>
-          <div id="campChoices"></div>
-
-          <div class="row" style="margin-top:10px;">
-            <div class="card" style="width:100%">
-              <h4>Handouts</h4>
-              <ul id="handouts"></ul>
+        <!-- Dice -->
+        <div id="diceTab" class="panel-body">
+          <div class="grid-2">
+            <label class="field">
+              <span>Expression</span>
+              <input id="expr" placeholder="Try: d20, 3d6+2, 4d6kh3, adv, dis…" />
+            </label>
+            <div class="vstack end">
+              <button id="rollBtn" class="btn primary xl">Roll</button>
             </div>
-            <div class="card" style="width:100%">
-              <h4>Quests</h4>
-              <ul id="quests"></ul>
+          </div>
+          <div class="hint">Keep highest/lowest: <code>4d6kh3</code> / <code>4d6kl3</code>. Advantage: <code>adv</code>.</div>
+        </div>
+
+        <!-- Characters -->
+        <div id="charsTab" class="panel-body">
+          <h3 class="section-title">Create / Edit Character</h3>
+
+          <div class="grid cols-1 cols-2@lg gap-12">
+            <div class="vstack gap-12">
+              <div class="grid-3 gap-8">
+                <input id="c_name" class="w-100" placeholder="Character name (defaults to your user)" />
+                <select id="c_archetype">
+                  <option value="">(Preset)</option>
+                  <option>Warrior</option><option>Rogue</option><option>Wizard</option><option>Cleric</option>
+                </select>
+                <select id="c_race">
+                  <option>Human</option><option>Elf</option><option>Dwarf</option><option>Halfling</option>
+                </select>
+              </div>
+
+              <div class="grid-6 sm-grid-3 gap-8">
+                <input id="c_class" placeholder="Class" />
+                <input id="c_level" type="number" min="1" max="20" value="1" />
+                <input id="c_ac" type="number" min="1" max="30" value="10" />
+                <input id="c_hp" type="number" min="0" max="1000" value="10" />
+                <input id="c_maxHp" type="number" min="1" max="1000" value="10" />
+                <input id="c_speed" type="number" min="0" max="120" value="30" />
+              </div>
+
+              <div class="abilities">
+                <div class="abilities-head">
+                  <div class="muted">27-Point Buy</div>
+                  <span class="chip" id="pointsLeft">Points left: 27</span>
+                </div>
+                <div class="grid-6 sm-grid-3 gap-8">
+                  <label class="ability"><span>STR</span><input id="ab_STR" type="number" min="8" max="15" value="8"></label>
+                  <label class="ability"><span>DEX</span><input id="ab_DEX" type="number" min="8" max="15" value="8"></label>
+                  <label class="ability"><span>CON</span><input id="ab_CON" type="number" min="8" max="15" value="8"></label>
+                  <label class="ability"><span>INT</span><input id="ab_INT" type="number" min="8" max="15" value="8"></label>
+                  <label class="ability"><span>WIS</span><input id="ab_WIS" type="number" min="8" max="15" value="8"></label>
+                  <label class="ability"><span>CHA</span><input id="ab_CHA" type="number" min="8" max="15" value="8"></label>
+                </div>
+              </div>
+
+              <input id="c_profs" placeholder="Proficiencies (comma-separated)" />
+              <textarea id="c_traits" rows="2" placeholder="Traits & features"></textarea>
+              <textarea id="c_notes" rows="3" placeholder="Notes, inventory…"></textarea>
+
+              <div class="hstack gap-8">
+                <button id="saveChar" class="btn primary">Save / Update</button>
+                <button id="deleteChar" class="btn danger ghost">Delete</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <h4 class="muted">All Characters</h4>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Name</th><th>Race</th><th>Archetype</th><th>Lvl</th><th>AC</th><th>HP</th><th>Abilities</th></tr></thead>
+                  <tbody id="charsTable"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map -->
+        <div id="mapTab" class="panel-body">
+          <div class="toolbar">
+            <div class="hstack wrap gap-8">
+              <button class="btn ghost" id="gmSetMap">Set Map (GM)</button>
+              <input class="w-10" id="mapW" type="number" value="20" min="5" max="60" />
+              <input class="w-10" id="mapH" type="number" value="20" min="5" max="60" />
+              <button class="btn ghost" id="gmClear">Clear Walls (GM)</button>
+              <label class="toggle"><input type="checkbox" id="drawWalls"><span>Draw Walls</span></label>
+              <label class="toggle"><input type="checkbox" id="eraseWalls"><span>Erase</span></label>
+            </div>
+
+            <div class="hstack wrap gap-8">
+              <button class="btn ghost" id="addToken">Add My Token</button>
+              <input id="tokenName" class="w-20" placeholder="Token name">
+              <input id="tokenColor" type="color" value="#222222" class="color">
+              <button class="btn ghost" id="removeToken">Remove Selected</button>
+              <button class="btn ghost" id="pingBtn">Ping</button>
+              <canvas id="miniCanvas" width="180" height="180" class="mini"></canvas>
             </div>
           </div>
 
-          <div class="card" style="margin-top:10px;">
-            <h4>Session Notes</h4>
-            <div id="notes"></div>
-            <div class="row" style="margin-top:6px;"><input id="noteText" placeholder="Add a note..." style="flex:1;"><button id="addNote">Add</button></div>
+          <div class="mapwrap">
+            <canvas id="mapCanvas" width="1000" height="560" class="map"></canvas>
           </div>
 
-          <div id="gmTools" class="gm" style="margin-top:10px; display:none;">
-            <h4>GM Tools</h4>
-            <div class="row"><input id="campTitle" placeholder="Campaign Title" style="flex:1;"><button id="saveCampMeta">Save Title</button></div>
-            <div class="row" style="margin-top:6px;"><textarea id="campSummary" rows="2" placeholder="Campaign Summary" style="flex:1;"></textarea><button id="saveCampSummary">Save Summary</button></div>
-            <hr/>
-            <div class="row"><input id="sceneTitle" placeholder="Scene title" style="flex:1;"><input id="sceneContent" placeholder="Scene content" style="flex:1;"><button id="addScene">Add Scene</button></div>
-            <div class="row" style="margin-top:6px;"><input id="sceneIdSet" placeholder="Scene ID to set"><button id="setScene">Set Current Scene</button></div>
-            <div class="row" style="margin-top:6px;"><input id="choiceSceneId" placeholder="Scene ID"><input id="choiceText" placeholder="Choice text"><input id="choiceTo" placeholder="Goto Scene ID"><button id="addChoice">Add Choice</button></div>
-            <hr/>
-            <div class="row"><input id="handoutTitle" placeholder="Handout title" style="flex:1;"><input id="handoutContent" placeholder="Handout content" style="flex:1;"><button id="addHandout">Add Handout</button></div>
-            <div class="row" style="margin-top:6px;"><input id="questTitle" placeholder="Quest title" style="flex:1;"><button id="addQuest">Add Quest</button></div>
+          <div class="hint">GM toggles walls; players drag their tokens. Click a tile then “Ping”.</div>
+        </div>
+
+        <!-- Encounter -->
+        <div id="encTab" class="panel-body">
+          <div class="hstack wrap gap-8">
+            <button id="encStart" class="btn ghost">Start Encounter (GM)</button>
+            <button id="encNext" class="btn ghost">Next Turn (GM)</button>
+            <button id="encEnd" class="btn ghost">End Encounter (GM)</button>
+          </div>
+          <div class="grid-3 gap-12 top-pad">
+            <div class="card">
+              <h4 class="muted">Initiative Order</h4>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>#</th><th>Name</th><th>Init</th></tr></thead>
+                  <tbody id="initTable"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <h4 class="muted">Set Initiative</h4>
+              <div class="grid-3 gap-8">
+                <input id="initName" placeholder="Name" />
+                <input id="initVal" type="number" placeholder="Init" />
+                <button id="setInit" class="btn primary">Set</button>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- Campaign (works with my add-on or your extended client.js) -->
+        <div id="campTab" class="panel-body">
+          <div class="grid cols-1 cols-2@lg gap-12">
+            <div class="vstack gap-12">
+              <div id="campMeta" class="card"></div>
+              <div id="campScene" class="card"></div>
+              <div id="campChoices" class="hstack wrap gap-8"></div>
+
+              <div class="grid-2 gap-12">
+                <div class="card">
+                  <h4 class="muted">Handouts</h4>
+                  <ul id="handouts" class="list"></ul>
+                </div>
+                <div class="card">
+                  <h4 class="muted">Quests</h4>
+                  <ul id="quests" class="list"></ul>
+                </div>
+              </div>
+
+              <div class="card">
+                <h4 class="muted">Session Notes</h4>
+                <div id="notes" class="notes"></div>
+                <div class="composer">
+                  <input id="noteText" placeholder="Add a note…" />
+                  <button id="addNote" class="btn">Add</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="gmTools" class="card gm-tools" style="display:none;">
+              <h3 class="section-title">GM Tools</h3>
+              <div class="vstack gap-12">
+                <div class="hstack gap-8">
+                  <input id="campTitle" class="grow" placeholder="Campaign Title" />
+                  <button id="saveCampMeta" class="btn primary">Save Title</button>
+                </div>
+                <div class="hstack gap-8">
+                  <textarea id="campSummary" rows="2" class="grow" placeholder="Campaign Summary"></textarea>
+                  <button id="saveCampSummary" class="btn">Save Summary</button>
+                </div>
+                <div class="divider"></div>
+
+                <div class="grid-3 gap-8">
+                  <input id="sceneTitle" placeholder="Scene title" />
+                  <input id="sceneContent" placeholder="Scene content" />
+                  <button id="addScene" class="btn">Add Scene</button>
+                </div>
+                <div class="hstack gap-8">
+                  <input id="sceneIdSet" placeholder="Scene ID to set" />
+                  <button id="setScene" class="btn">Set Current Scene</button>
+                </div>
+                <div class="grid-4 gap-8">
+                  <input id="choiceSceneId" placeholder="Scene ID" />
+                  <input id="choiceText" placeholder="Choice text" />
+                  <input id="choiceTo" placeholder="Goto Scene ID" />
+                  <button id="addChoice" class="btn">Add Choice</button>
+                </div>
+                <div class="divider"></div>
+
+                <div class="grid-3 gap-8">
+                  <input id="handoutTitle" placeholder="Handout title" />
+                  <input id="handoutContent" placeholder="Handout content" />
+                  <button id="addHandout" class="btn">Add Handout</button>
+                </div>
+                <div class="hstack gap-8">
+                  <input id="questTitle" placeholder="Quest title" />
+                  <button id="addQuest" class="btn">Add Quest</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </section>
     </main>
-    <footer>Create a lobby with a password to become GM. Build your story with scenes, choices, handouts, and quests.</footer>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+    <footer class="footer">
+      <div class="muted">Create a lobby with a password to become GM. Build your story with scenes, choices, handouts, and quests.</div>
+    </footer>
+
+    <!-- Your existing client file (keep the same) -->
     <script src="/client.js"></script>
+
+    <!-- Small inline script to support theme toggle + tab behavior (no logic changes) -->
+    <script>
+      // Tabs (your client.js also wires this; this just ensures UX on first load)
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.panel-body').forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById(btn.dataset.tab).classList.add('active');
+        });
+      });
+
+      // Theme toggle
+      const root = document.documentElement;
+      const saved = localStorage.getItem('theme');
+      if (saved) root.dataset.theme = saved;
+      document.getElementById('themeToggle').addEventListener('click', () => {
+        root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', root.dataset.theme);
+      });
+    </script>
   </body>
 </html>

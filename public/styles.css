@@ -1,0 +1,18 @@
+/* Better focus outlines */
+:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* Reduce motion if user prefers */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Smoother text + nicer selection */
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+::selection { background: color-mix(in srgb, var(--primary) 35%, transparent); color: var(--text); }
+
+/* Scrollbar (WebKit) */
+.log::-webkit-scrollbar, .list::-webkit-scrollbar { width: 10px; height: 10px; }
+.log::-webkit-scrollbar-thumb, .list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--card) 80%, transparent);
+  border-radius: 10px;
+}
