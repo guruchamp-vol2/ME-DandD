@@ -245,3 +245,97 @@ body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; 
   background: color-mix(in srgb, var(--card) 80%, transparent);
   border-radius: 10px;
 }
+/* ===================== Modals / Popups ===================== */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+}
+
+.modal__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(4px) saturate(110%);
+  animation: modalFade .15s ease-out;
+}
+
+.modal__card {
+  position: relative;
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(80vh, 900px);
+  overflow: auto;
+  padding: 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  animation: modalPop .18s ease-out;
+}
+
+@keyframes modalFade {
+  from { opacity: 0; } to { opacity: 1; }
+}
+@keyframes modalPop {
+  from { transform: translateY(6px) scale(.98); opacity: 0.0; }
+  to   { transform: translateY(0)   scale(1);    opacity: 1; }
+}
+
+/* Buttons inside modals align to the end via container (see .hstack.end already) */
+
+/* ===================== Minor polish / utilities ===================== */
+.btn.icon { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; }
+.btn[disabled], .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.small { font-size: 12px; color: var(--muted); }
+.danger { background: color-mix(in srgb, var(--danger) 20%, transparent); color: #fff; }
+
+/* Explicit chip stronger style when used as a warning */
+.chip.danger {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger) 20%, var(--card));
+  color: #fff;
+}
+
+/* Better scroll aesthetics for log and modal bodies */
+.log, .modal__card {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 40%, #808080) transparent;
+}
+.log::-webkit-scrollbar,
+.modal__card::-webkit-scrollbar { width: 8px; height: 8px; }
+.log::-webkit-scrollbar-thumb,
+.modal__card::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 35%, #606060);
+  border-radius: 999px;
+}
+
+/* Buttons inside choices area */
+#campChoices .btn { padding: 8px 12px; border-radius: 12px; }
+
+/* GM Tools header spacing tweak when we inject the Start button */
+#gmTools > .hstack:first-child { margin-bottom: 8px; }
+
+/* Accessibility: focus ring */
+:where(button, .btn, input, select, textarea, .tab-btn):focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+/* Optional: soft highlight for the "waiting for GM" chip */
+#campTab .chip { background: color-mix(in srgb, var(--primary-2) 12%, var(--card)); }
+
+/* Ensure tables don't overflow on small screens inside cards */
+.table-wrap { overflow: auto; max-width: 100%; }
+
+/* Slightly tighter panel-body spacing on mobile */
+@media (max-width: 640px){
+  .panel-body { padding: 10px; }
+  .tabs { gap: 6px; }
+}
+
+/* Make sure modal content never gets hidden behind footer on tiny screens */
+@media (max-height: 560px){
+  .modal__card { max-height: calc(100vh - 32px); }
+}

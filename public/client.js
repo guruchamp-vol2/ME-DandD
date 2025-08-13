@@ -1,63 +1,123 @@
-// ===== client.js (Part 1/3) =====
-// Requires <script src="/socket.io/socket.io.js"></script> in index.html
+/* D&D Lobbies — full client.js (works with consent + start-lock + character popup) */
+/* Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file */
+
 const socket = io();
 
-// ------- DOM helpers -------
+/* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
+const bySel = (sel, root=document) => root.querySelector(sel);
+const bySelAll = (sel, root=document) => [...root.querySelectorAll(sel)];
+
 const log = (html, cls='') => {
   const el = document.createElement('div');
   el.className = cls; el.innerHTML = html;
-  const host = $('log'); if (!host) return;
-  host.appendChild(el); host.scrollTop = host.scrollHeight;
+  const logEl = $('log'); if (!logEl) return;
+  logEl.appendChild(el); logEl.scrollTop = logEl.scrollHeight;
 };
 
-// Tabs
 const switchTab = (id) => {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
-  document.querySelectorAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
+  bySelAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
+  bySelAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
 };
-document.querySelectorAll('.tab-btn').forEach(btn =>
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab))
-);
+bySelAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 
-function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
-function linkify(s){ return s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
+const escapeHtml = (s)=> String(s)
+  .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+  .replaceAll('"','&quot;').replaceAll("'",'&#039;');
+const linkify = (s)=> s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
 
-// ------- Lobby actions -------
-$('joinBtn')?.addEventListener('click', () => {
-  const name = $('name').value.trim() || 'Anon';
-  const lobby = $('lobby').value.trim() || 'tavern';
-  const password = $('password').value.trim();
+/* ---------------- Tiny UI Kit: modal + toast ---------------- */
+function ensureLayer() {
+  let layer = $('modal-layer');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'modal-layer';
+    layer.style.position = 'fixed';
+    layer.style.inset = '0';
+    layer.style.display = 'none';
+    layer.style.alignItems = 'center';
+    layer.style.justifyContent = 'center';
+    layer.style.background = 'rgba(0,0,0,0.4)';
+    layer.style.zIndex = '9999';
+    document.body.appendChild(layer);
+    layer.addEventListener('click', (e)=> { if (e.target === layer) hideModal(); });
+  }
+  return layer;
+}
+function showModal(contentEl) {
+  const layer = ensureLayer();
+  layer.innerHTML = '';
+  layer.appendChild(contentEl);
+  layer.style.display = 'flex';
+}
+function hideModal() {
+  const layer = $('modal-layer');
+  if (layer) { layer.style.display = 'none'; layer.innerHTML = ''; }
+}
+function makeCard(titleHTML, bodyEl, actions=[]) {
+  const card = document.createElement('div');
+  card.style.background = 'var(--surface, #fff)';
+  card.style.minWidth = 'min(92vw, 720px)';
+  card.style.maxWidth = 'min(92vw, 720px)';
+  card.style.borderRadius = '16px';
+  card.style.boxShadow = '0 10px 30px rgba(0,0,0,.2)';
+  card.style.padding = '16px';
+  card.innerHTML = `<h3 style="margin:0 0 8px 0">${titleHTML}</h3>`;
+  card.appendChild(bodyEl);
+  const bar = document.createElement('div');
+  bar.style.display = 'flex'; bar.style.gap = '8px'; bar.style.justifyContent='flex-end'; bar.style.marginTop='12px';
+  actions.forEach(a => bar.appendChild(a));
+  card.appendChild(bar);
+  return card;
+}
+function makeBtn(text, opts={}) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  b.className = 'btn';
+  if (opts.primary) b.classList.add('primary');
+  if (opts.ghost) b.classList.add('ghost');
+  if (opts.danger) b.classList.add('danger');
+  return b;
+}
+
+/* ---------------- Lobby actions ---------------- */
+$('joinBtn')?.addEventListener('click', ()=>{
+  const name = $('name')?.value.trim() || 'Anon';
+  const lobby = $('lobby')?.value.trim() || 'tavern';
+  const password = $('password')?.value.trim() || '';
   socket.emit('identify', { name });
   socket.emit('join_lobby', { lobby, password });
 });
 
-$('listBtn')?.addEventListener('click', async () => {
+$('listBtn')?.addEventListener('click', async ()=>{
   try {
-    const res = await fetch('/lobbies', { headers: { 'Accept': 'application/json' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch('/lobbies', { headers:{'accept':'application/json'} });
+    if (!res.ok) throw new Error('HTTP '+res.status);
     const list = await res.json();
     const ul = $('lobbies'); if (!ul) return;
     ul.innerHTML = '';
-    (list || []).forEach(l => {
+    (list||[]).forEach(l => {
       const li = document.createElement('li');
-      li.textContent = l; li.style.cursor='pointer';
-      li.onclick = () => { $('lobby').value = l; };
+      li.textContent = l;
+      li.style.cursor='pointer';
+      li.onclick = ()=>{ const lobby = $('lobby'); if (lobby) lobby.value = l; };
       ul.appendChild(li);
     });
   } catch (e) {
-    log(`Error loading lobbies. Is your server routing /lobbies? (${escapeHtml(String(e))})`, 'sys');
+    log(`Error loading lobbies: ${escapeHtml(String(e.message||e))}`, 'sys');
   }
 });
 
-// ------- Chat / Dice -------
-$('sendBtn')?.addEventListener('click', () => {
-  const text = $('msg').value.trim(); if (!text) return;
-  socket.emit('chat', { text }); $('msg').value='';
+/* ---------------- Chat / Dice ---------------- */
+$('sendBtn')?.addEventListener('click', ()=>{
+  const msg = $('msg')?.value.trim(); if (!msg) return;
+  socket.emit('chat', { text: msg });
+  $('msg').value='';
 });
-$('msg')?.addEventListener('keydown', (e)=> { if (e.key==='Enter') $('sendBtn').click(); });
-$('rollBtn')?.addEventListener('click', () => {
-  const expression = $('expr').value.trim() || 'd20';
+$('msg')?.addEventListener('keydown', (e)=> { if (e.key==='Enter') $('sendBtn')?.click(); });
+
+$('rollBtn')?.addEventListener('click', ()=>{
+  const expression = $('expr')?.value.trim() || 'd20';
   socket.emit('roll', { expression });
 });
 
@@ -71,7 +131,7 @@ function renderRoll({ user, expression, rolls, used, modifier, total, ts }) {
   log(`<div class="roll"><strong>${escapeHtml(user)}</strong> rolled <code>${escapeHtml(expression)}</code> → <strong>${total}</strong> <small>${when}</small><br/>Rolls: [${(rolls||[]).join(', ')}] • Used: [${(used||[]).join(', ')}] ${modStr}</div>`, 'roll');
 }
 
-// ------- Character Customization -------
+/* ---------------- Characters (point buy + table) ---------------- */
 const PRESETS = {
   Warrior: { STR:15, DEX:10, CON:14, INT:8, WIS:10, CHA:10, traits:'Martial prowess, Second Wind' },
   Rogue:   { STR:8,  DEX:15, CON:12, INT:10, WIS:10, CHA:12, traits:'Sneak Attack, Cunning Action' },
@@ -85,62 +145,58 @@ const RACE_MODS = {
   Halfling:{ DEX:2, CHA:1, speed:25, note:'Lucky, Brave' },
 };
 const AB_IDS = ['STR','DEX','CON','INT','WIS','CHA'];
-
 const cost = (score) => {
   if (score < 8) return 0;
   if (score <= 13) return score - 8;
-  if (score === 14) return 9; // 7 + 2
-  if (score === 15) return 11; // 9 + 2
+  if (score === 14) return 9;      // 7 + 2 bump
+  if (score === 15) return 11;     // 9 + 2 bump
   return 999;
 };
-const totalCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt($('ab_'+id).value||8,10)), 0);
+const totalCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt($('ab_'+id)?.value||8,10)), 0);
 const updatePoints = () => {
-  const spent = totalCost();
-  const left = 27 - spent;
-  const chip = $('pointsLeft');
-  if (chip) {
-    chip.textContent = `Points left: ${left}`;
-    chip.style.background = left < 0 ? '#ffe6e6' : '';
-  }
+  const left = 27 - totalCost();
+  const chip = $('pointsLeft'); if (!chip) return;
+  chip.textContent = `Points left: ${left}`;
+  chip.style.background = left < 0 ? '#ffe6e6' : '';
 };
-AB_IDS.forEach(id => $('ab_'+id)?.addEventListener('input', updatePoints));
 
+AB_IDS.forEach(id => $('ab_'+id)?.addEventListener('input', updatePoints));
 $('c_archetype')?.addEventListener('change', ()=>{
   const a = $('c_archetype').value;
   if (!a || !PRESETS[a]) return;
   AB_IDS.forEach(id => { const el = $('ab_'+id); if (el) el.value = PRESETS[a][id]; });
-  const traits = $('c_traits'); if (traits) traits.value = (PRESETS[a].traits || '');
+  if ($('c_traits') && PRESETS[a].traits) $('c_traits').value = PRESETS[a].traits;
   updatePoints();
 });
-
 $('c_race')?.addEventListener('change', ()=>{
   const r = $('c_race').value;
   const mod = RACE_MODS[r] || {};
-  const speedEl = $('c_speed'); if (speedEl) speedEl.value = mod.speed || 30;
-  const tips = mod.note ? `; ${mod.note}` : '';
-  const traits = $('c_traits'); if (mod.note && traits && !traits.value.includes(mod.note)) traits.value = (traits.value || '') + tips;
+  if ($('c_speed')) $('c_speed').value = mod.speed || 30;
+  if (mod.note && $('c_traits') && !$('c_traits').value.includes(mod.note)) {
+    $('c_traits').value = (($('c_traits').value || '') + '; ' + mod.note).trim();
+  }
 });
 
-$('saveChar')?.addEventListener('click', () => {
-  const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt($('ab_'+id).value||8,10)]));
+$('saveChar')?.addEventListener('click', ()=>{
+  const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt($('ab_'+id)?.value||8,10)]));
   const sheet = {
     name: $('c_name')?.value.trim(),
     class: $('c_class')?.value.trim(),
     archetype: $('c_archetype')?.value || '',
     race: $('c_race')?.value || 'Human',
-    level: Number($('c_level')?.value || 1),
-    ac: Number($('c_ac')?.value || 10),
-    hp: Number($('c_hp')?.value || 10),
-    maxHp: Number($('c_maxHp')?.value || 10),
+    level: Number($('c_level')?.value||1),
+    ac: Number($('c_ac')?.value||10),
+    hp: Number($('c_hp')?.value||10),
+    maxHp: Number($('c_maxHp')?.value||10),
     abilities,
-    speed: Number($('c_speed')?.value || 30),
+    speed: Number($('c_speed')?.value||30),
     profs: $('c_profs')?.value || '',
     traits: $('c_traits')?.value || '',
     notes: $('c_notes')?.value || ''
   };
   socket.emit('character_upsert', sheet);
 });
-$('deleteChar')?.addEventListener('click', () => {
+$('deleteChar')?.addEventListener('click', ()=>{
   socket.emit('character_delete', { name: $('c_name')?.value.trim() });
 });
 
@@ -161,27 +217,26 @@ function renderChars(charsObj){
     `;
     tr.style.cursor='pointer';
     tr.onclick = ()=>{
-      $('c_name').value = c.name || '';
-      $('c_class').value = c.class || '';
-      $('c_archetype').value = c.archetype || '';
-      $('c_race').value = c.race || 'Human';
-      $('c_level').value = c.level || 1;
-      $('c_ac').value = c.ac || 10;
-      $('c_hp').value = c.hp || 10;
-      $('c_maxHp').value = c.maxHp || 10;
-      AB_IDS.forEach(id => $('ab_'+id).value = (c.abilities?.[id] ?? 8));
-      $('c_speed').value = c.speed || 30;
-      $('c_profs').value = c.profs || '';
-      $('c_traits').value = c.traits || '';
-      $('c_notes').value = c.notes || '';
+      if ($('c_name')) $('c_name').value = c.name || '';
+      if ($('c_class')) $('c_class').value = c.class || '';
+      if ($('c_archetype')) $('c_archetype').value = c.archetype || '';
+      if ($('c_race')) $('c_race').value = c.race || 'Human';
+      if ($('c_level')) $('c_level').value = c.level || 1;
+      if ($('c_ac')) $('c_ac').value = c.ac || 10;
+      if ($('c_hp')) $('c_hp').value = c.hp || 10;
+      if ($('c_maxHp')) $('c_maxHp').value = c.maxHp || 10;
+      AB_IDS.forEach(id => { const el = $('ab_'+id); if (el) el.value = (c.abilities?.[id] ?? 8); });
+      if ($('c_speed')) $('c_speed').value = c.speed || 30;
+      if ($('c_profs')) $('c_profs').value = c.profs || '';
+      if ($('c_traits')) $('c_traits').value = c.traits || '';
+      if ($('c_notes')) $('c_notes').value = c.notes || '';
       updatePoints();
     };
     tbody.appendChild(tr);
   });
 }
-// ===== client.js (Part 2/3) =====
 
-// ------- Map -------
+/* ---------------- Map ---------------- */
 let MAP = { w:20, h:20, tiles:[], tokens:{} };
 const mapCanvas = $('mapCanvas');
 const miniCanvas = $('miniCanvas');
@@ -190,23 +245,20 @@ const mctx = miniCanvas?.getContext('2d');
 
 let cellW = 24, cellH = 24;
 function resizeCells(){
-  if (!mapCanvas || !MAP.w || !MAP.h) return;
-  cellW = Math.floor(mapCanvas.width / MAP.w);
-  cellH = Math.floor(mapCanvas.height / MAP.h);
+  if (!mapCanvas) return;
+  cellW = Math.max(1, Math.floor(mapCanvas.width / (MAP.w || 1)));
+  cellH = Math.max(1, Math.floor(mapCanvas.height / (MAP.h || 1)));
 }
-
 function drawMap(){
-  if (!ctx || !mctx || !mapCanvas || !miniCanvas) return;
-
+  if (!mapCanvas || !ctx || !mctx) return;
   ctx.clearRect(0,0,mapCanvas.width,mapCanvas.height);
 
-  // Guard: if tiles not ready, clear mini and bail
-  if (!Array.isArray(MAP.tiles) || MAP.tiles.length === 0) {
+  // Guard tiles
+  if (!Array.isArray(MAP.tiles) || MAP.tiles.length !== (MAP.h||0)) {
     mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
     return;
   }
 
-  // Grid + walls
   for (let y=0;y<MAP.h;y++){
     for (let x=0;x<MAP.w;x++){
       const isWall = ((MAP.tiles[y] || [])[x] === 1);
@@ -217,7 +269,6 @@ function drawMap(){
     }
   }
 
-  // Tokens
   Object.values(MAP.tokens||{}).forEach(t=>{
     const cx = t.x*cellW + cellW/2, cy = t.y*cellH + cellH/2;
     ctx.beginPath(); ctx.arc(cx,cy, Math.min(cellW,cellH)*0.35, 0, Math.PI*2);
@@ -229,9 +280,8 @@ function drawMap(){
     ctx.fillText((t.name||'?')[0]?.toUpperCase() || '?', cx, cy);
   });
 
-  // Mini-map
   mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
-  const sx = miniCanvas.width / MAP.w, sy = miniCanvas.height / MAP.h;
+  const sx = miniCanvas.width / (MAP.w || 1), sy = miniCanvas.height / (MAP.h || 1);
   for (let y=0;y<MAP.h;y++){
     for (let x=0;x<MAP.w;x++){
       const isWall = ((MAP.tiles[y] || [])[x] === 1);
@@ -283,24 +333,17 @@ mapCanvas?.addEventListener('mousemove', (e)=>{
 });
 window.addEventListener('mouseup', ()=> { dragging = false; });
 
-$('gmSetMap')?.addEventListener('click', () => socket.emit('map_init', {
-  w: Number($('mapW')?.value || 20),
-  h: Number($('mapH')?.value || 20)
-}));
-$('gmClear')?.addEventListener('click', () => socket.emit('map_clear'));
-$('addToken')?.addEventListener('click', () => socket.emit('token_add', {
-  name: $('tokenName')?.value.trim() || $('name')?.value.trim() || 'Anon',
-  color: $('tokenColor')?.value || '#222222'
-}));
-$('removeToken')?.addEventListener('click', () => { if (selectedTokenId) socket.emit('token_remove', { id: selectedTokenId }); });
-$('pingBtn')?.addEventListener('click', () => {
-  const x = Math.floor(MAP.w/2), y = Math.floor(MAP.h/2);
+$('gmSetMap')?.addEventListener('click', ()=> socket.emit('map_init', { w: Number($('mapW')?.value||20), h: Number($('mapH')?.value||20) }));
+$('gmClear')?.addEventListener('click', ()=> socket.emit('map_clear'));
+$('addToken')?.addEventListener('click', ()=> socket.emit('token_add', { name: $('tokenName')?.value.trim() || $('name')?.value.trim() || 'Anon', color: $('tokenColor')?.value || '#222' }));
+$('removeToken')?.addEventListener('click', ()=> { if (selectedTokenId) socket.emit('token_remove', { id: selectedTokenId }); });
+$('pingBtn')?.addEventListener('click', ()=>{
+  const x = Math.floor((MAP.w||1)/2), y = Math.floor((MAP.h||1)/2);
   socket.emit('ping', { x, y });
 });
 
 let pings = [];
 function renderPings(){
-  if (!ctx) return;
   const now = Date.now();
   pings = pings.filter(p => now - p.ts < 1200);
   pings.forEach(p=>{
@@ -308,19 +351,19 @@ function renderPings(){
     const r = Math.min(cellW,cellH) * (0.2 + t*0.8);
     const cx = p.x*cellW + cellW/2, cy = p.y*cellH + cellH/2;
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
-    ctx.strokeStyle = `rgba(220, 38, 38, ${1-t})`;
+    ctx.strokeStyle = `rgba(220,38,38,${1-t})`;
     ctx.lineWidth = 3; ctx.stroke();
   });
   if (pings.length) requestAnimationFrame(()=>{ drawMap(); renderPings(); });
 }
 
-// ------- Encounter -------
-$('encStart')?.addEventListener('click', () => socket.emit('chat', { text: '/startencounter' }));
-$('encNext')?.addEventListener('click',  () => socket.emit('chat', { text: '/next' }));
-$('encEnd')?.addEventListener('click',   () => socket.emit('chat', { text: '/endencounter' }));
-$('setInit')?.addEventListener('click',  () => {
+/* ---------------- Encounter ---------------- */
+$('encStart')?.addEventListener('click', ()=> socket.emit('chat', { text: '/startencounter' }));
+$('encNext')?.addEventListener('click',  ()=> socket.emit('chat', { text: '/next' }));
+$('encEnd')?.addEventListener('click',   ()=> socket.emit('chat', { text: '/endencounter' }));
+$('setInit')?.addEventListener('click',  ()=>{
   const name = $('initName')?.value.trim();
-  const val  = Number($('initVal')?.value || 0);
+  const val  = Number($('initVal')?.value||0);
   if (!name) return;
   socket.emit('chat', { text: `/setinit ${name} ${val}` });
 });
@@ -335,116 +378,193 @@ function renderEncounter(enc){
     tbody.appendChild(tr);
   });
 }
-// ===== client.js (Part 3/3) =====
 
-// ------- Campaign / Story Mode -------
-function _escape(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;')
-  .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
-function ensureCampaignUI() { return !!$('campTab'); }
+/* ---------------- Campaign: start-lock, consent, UI ---------------- */
+let CAMPAIGN = { started:false, currentSceneId:null, pendingChoice:null };
 
-function renderCampaignState(c){
-  if (!ensureCampaignUI()) return;
-
-  $('campMeta').innerHTML =
-    `<h3>${_escape(c.title || 'Untitled Campaign')}</h3><p class="small">${_escape(c.summary || '')}</p>`;
-
-  const current = (c.scenes || []).find(s => s.id === c.currentSceneId);
-  $('campScene').innerHTML = current
-    ? `<h4>${_escape(current.title)}</h4><p>${_escape(current.content || '')}</p>
-       <div class="small">Scene ID: <code>${_escape(current.id)}</code></div>`
-    : `<em>No scene selected</em>`;
-
-  const choicesEl = $('campChoices'); choicesEl.innerHTML = '';
-  (current?.choices || []).forEach(ch => {
-    const btn = document.createElement('button');
-    btn.className = 'btn ghost';
-    btn.textContent = ch.text;
-    btn.onclick = () => socket.emit('campaign_choice_pick', { choiceId: ch.id });
-    choicesEl.appendChild(btn);
-  });
-
-  $('handouts').innerHTML = (c.handouts || [])
-    .map(h => `<li><strong>${_escape(h.title)}</strong>: ${_escape(h.content)}</li>`).join('');
-
-  $('quests').innerHTML = (c.quests || [])
-    .map(q => `<li>${q.done ? '✅' : '⬜️'} ${_escape(q.title)} <small><code>${_escape(q.id)}</code></small></li>`)
-    .join('');
-
-  $('notes').innerHTML = (c.notes || [])
-    .map(n => `<div class="small"><strong>${_escape(n.by)}</strong>: ${_escape(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`)
-    .join('');
-
-  // GM tools visibility heuristic
-  const myNameGuess = document.querySelector('#users .pill')?.textContent?.replace(/^@/, '') || '';
-  const gmText = document.getElementById('gmBadge')?.textContent || '';
-  const isGM = gmText.includes(myNameGuess) || gmText.includes('You') || gmText.includes('(you)');
-  const tools = $('gmTools'); if (tools) tools.style.display = isGM ? 'block' : 'none';
+function gmControlsBar(isGM) {
+  // inject or update a small control row in Campaign panel
+  const tab = $('campTab'); if (!tab) return;
+  let bar = bySel('[data-gmbar]', tab);
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.dataset.gmbar = '1';
+    bar.className = 'hstack wrap gap-8';
+    bar.style.margin = '8px 0';
+    tab.prepend(bar);
+  }
+  bar.innerHTML = '';
+  if (isGM && !CAMPAIGN.started) {
+    const b = makeBtn('Start Campaign', { primary:true });
+    b.addEventListener('click', ()=> socket.emit('campaign_start'));
+    bar.appendChild(b);
+  }
+  if (isGM && CAMPAIGN.pendingChoice) {
+    const f = makeBtn('Force Proceed (GM)', { danger:true });
+    f.addEventListener('click', ()=> socket.emit('campaign_choice_force'));
+    bar.appendChild(f);
+  }
 }
 
-function wireCampaignButtons(){
-  if (!ensureCampaignUI()) return;
-  const byId = (i) => document.getElementById(i);
+function renderCampaignState(c){
+  CAMPAIGN = { ...CAMPAIGN, ...c };
 
-  byId('addNote')?.addEventListener('click', ()=>{
-    const t = byId('noteText').value.trim(); if (!t) return;
+  const meta = $('campMeta'), sceneEl = $('campScene'), choicesWrap = $('campChoices');
+  if (!meta || !sceneEl || !choicesWrap) return;
+
+  meta.innerHTML = `<h3>${escapeHtml(c.title || 'Untitled Campaign')}</h3><p class="small">${escapeHtml(c.summary || '')}</p>`;
+
+  const current = (c.scenes || []).find(s => s.id === c.currentSceneId);
+  sceneEl.innerHTML = current
+    ? `<h4>${escapeHtml(current.title)}</h4><p>${escapeHtml(current.content || '')}</p>
+       <div class="small">Scene ID: <code>${escapeHtml(current.id)}</code></div>`
+    : `<em>No scene selected</em>`;
+
+  // Choices
+  choicesWrap.innerHTML = '';
+  const isGM = $('gmBadge')?.textContent?.includes(': ') && $('gmBadge').textContent.endsWith(CAMPAIGN?.gm);
+  const gmName = $('gmBadge')?.textContent?.replace(/^GM:\s*/, '') || '';
+  const amGM = gmName && bySel('#users .pill')?.textContent?.slice(1) === gmName;
+
+  gmControlsBar(amGM);
+
+  (current?.choices || []).forEach(ch=>{
+    const btn = makeBtn(ch.text);
+    if (amGM && CAMPAIGN.started) {
+      // GM requests consent
+      btn.addEventListener('click', ()=> socket.emit('campaign_choice_request', { choiceId: ch.id }));
+    } else {
+      btn.disabled = true;
+      btn.title = CAMPAIGN.started ? 'Only the GM can choose' : 'Campaign not started yet';
+    }
+    choicesWrap.appendChild(btn);
+  });
+
+  // Lists
+  const handouts = $('handouts'), quests = $('quests'), notes = $('notes');
+  if (handouts) handouts.innerHTML = (c.handouts||[]).map(h => `<li><strong>${escapeHtml(h.title)}</strong>: ${escapeHtml(h.content)}</li>`).join('');
+  if (quests) quests.innerHTML = (c.quests||[]).map(q => `<li>${q.done ? '✅' : '⬜️'} ${escapeHtml(q.title)} <small><code>${escapeHtml(q.id)}</code></small></li>`).join('');
+  if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by)}</strong>: ${escapeHtml(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`).join('');
+}
+
+function wireCampaignInputs(){
+  $('addNote')?.addEventListener('click', ()=>{
+    const t = $('noteText')?.value.trim(); if (!t) return;
     socket.emit('campaign_note_add', { text: t });
-    byId('noteText').value = '';
+    $('noteText').value='';
   });
-
-  byId('saveCampMeta')?.addEventListener('click', ()=>{
-    const title = byId('campTitle').value.trim();
-    if (title) socket.emit('campaign_update_meta', { title });
+  $('saveCampMeta')?.addEventListener('click', ()=>{
+    const title = $('campTitle')?.value.trim(); if (!title) return;
+    socket.emit('campaign_update_meta', { title });
   });
-
-  byId('saveCampSummary')?.addEventListener('click', ()=>{
-    socket.emit('campaign_update_meta', { summary: byId('campSummary').value });
+  $('saveCampSummary')?.addEventListener('click', ()=>{
+    socket.emit('campaign_update_meta', { summary: $('campSummary')?.value || '' });
   });
-
-  byId('addScene')?.addEventListener('click', ()=>{
-    socket.emit('campaign_scene_add', {
-      title: byId('sceneTitle').value.trim() || 'New Scene',
-      content: byId('sceneContent').value || ''
-    });
+  $('addScene')?.addEventListener('click', ()=>{
+    socket.emit('campaign_scene_add', { title: $('sceneTitle')?.value || 'New Scene', content: $('sceneContent')?.value || '' });
   });
-
-  byId('setScene')?.addEventListener('click', ()=>{
-    const id = byId('sceneIdSet').value.trim();
-    if (id) socket.emit('campaign_scene_set', { sceneId: id });
+  $('setScene')?.addEventListener('click', ()=>{
+    const id = $('sceneIdSet')?.value.trim(); if (!id) return;
+    socket.emit('campaign_scene_set', { sceneId: id });
   });
-
-  byId('addChoice')?.addEventListener('click', ()=>{
-    socket.emit('campaign_choice_add', {
-      sceneId: byId('choiceSceneId').value.trim(),
-      text:    byId('choiceText').value.trim() || 'Choice',
-      to:      byId('choiceTo').value.trim()
-    });
+  $('addChoice')?.addEventListener('click', ()=>{
+    socket.emit('campaign_choice_add', { sceneId: $('choiceSceneId')?.value.trim(), text: $('choiceText')?.value || 'Choice', to: $('choiceTo')?.value.trim() });
   });
-
-  byId('addHandout')?.addEventListener('click', ()=>{
-    socket.emit('campaign_handout_add', {
-      title:   byId('handoutTitle').value.trim() || 'Handout',
-      content: byId('handoutContent').value || ''
-    });
+  $('addHandout')?.addEventListener('click', ()=>{
+    socket.emit('campaign_handout_add', { title: $('handoutTitle')?.value || 'Handout', content: $('handoutContent')?.value || '' });
   });
-
-  byId('addQuest')?.addEventListener('click', ()=>{
-    const t = byId('questTitle').value.trim(); if (!t) return;
+  $('addQuest')?.addEventListener('click', ()=>{
+    const t = $('questTitle')?.value.trim(); if (!t) return;
     socket.emit('campaign_quest_add', { title: t });
   });
 }
 
-// ------- Socket events -------
+/* ---------------- Character Creator Popup ---------------- */
+function openCharacterPopup(prefillName=''){
+  const body = document.createElement('div');
+  body.innerHTML = `
+  <div class="grid cols-1 gap-8">
+    <label class="field"><span>Name</span><input id="pc_name" placeholder="Your hero" value="${escapeHtml(prefillName)}"/></label>
+    <div class="grid-3 gap-8">
+      <label class="field"><span>Archetype</span>
+        <select id="pc_arch"><option value="">(Preset)</option><option>Warrior</option><option>Rogue</option><option>Wizard</option><option>Cleric</option></select>
+      </label>
+      <label class="field"><span>Race</span>
+        <select id="pc_race"><option>Human</option><option>Elf</option><option>Dwarf</option><option>Halfling</option></select>
+      </label>
+      <label class="field"><span>Class</span><input id="pc_class" placeholder="e.g. Fighter"/></label>
+    </div>
+    <div class="grid-6 sm-grid-3 gap-8">
+      ${AB_IDS.map(id=>`<label class="ability small"><span>${id}</span><input id="pc_${id}" type="number" min="8" max="15" value="8"></label>`).join('')}
+    </div>
+    <div class="small muted" id="pc_points">Points left: 27</div>
+  </div>`;
+  // wire point-buy
+  const pcPoints = body.querySelector('#pc_points');
+  const pcCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt(body.querySelector('#pc_'+id)?.value||8,10)), 0);
+  const pcUpdate = ()=>{
+    const left = 27 - pcCost();
+    pcPoints.textContent = `Points left: ${left}`;
+    pcPoints.style.color = left < 0 ? '#b91c1c' : '';
+  };
+  AB_IDS.forEach(id=> body.querySelector('#pc_'+id).addEventListener('input', pcUpdate));
+  body.querySelector('#pc_arch').addEventListener('change', (e)=>{
+    const a = e.target.value;
+    if (a && PRESETS[a]) {
+      AB_IDS.forEach(id => { body.querySelector('#pc_'+id).value = PRESETS[a][id]; });
+      pcUpdate();
+    }
+  });
+  pcUpdate();
+
+  const cancel = makeBtn('Later', { ghost:true });
+  cancel.addEventListener('click', hideModal);
+
+  const save = makeBtn('Save Character', { primary:true });
+  save.addEventListener('click', ()=>{
+    const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt(body.querySelector('#pc_'+id)?.value||8,10)]));
+    const sheet = {
+      name: body.querySelector('#pc_name')?.value.trim() || $('name')?.value.trim() || 'Hero',
+      class: body.querySelector('#pc_class')?.value.trim() || '',
+      archetype: body.querySelector('#pc_arch')?.value || '',
+      race: body.querySelector('#pc_race')?.value || 'Human',
+      level: 1, ac: 10, hp: 10, maxHp: 10,
+      abilities, speed: 30, profs: '', traits: '', notes: ''
+    };
+    socket.emit('character_upsert', sheet);
+    hideModal();
+  });
+
+  showModal(makeCard('Create Your Character', body, [cancel, save]));
+}
+
+/* ---------------- Consent Modal ---------------- */
+function openConsentModal({ text, requestedBy }){
+  const body = document.createElement('div');
+  body.innerHTML = `<p>${escapeHtml(requestedBy)} proposes: <strong>${escapeHtml(text)}</strong></p>
+  <p class="small muted">Everyone must accept (or the GM can force after ~30s).</p>`;
+  const cancel = makeBtn('Not Yet', { ghost:true });
+  cancel.addEventListener('click', hideModal);
+  const ok = makeBtn("I'm OK with this", { primary:true });
+  ok.addEventListener('click', ()=>{
+    socket.emit('campaign_choice_ack');
+    hideModal();
+  });
+  showModal(makeCard('Proceed?', body, [cancel, ok]));
+}
+
+/* ---------------- Socket events ---------------- */
 socket.on('identified', ({ username })=> log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys'));
 
 socket.on('joined', ({ lobby, history, gm })=>{
-  const logHost = $('log'); if (logHost) logHost.innerHTML = '';
+  if ($('log')) $('log').innerHTML = '';
   log(`Joined lobby <strong>${escapeHtml(lobby)}</strong>.`, 'sys');
-  (history.messages||[]).forEach(m=>renderChat(m));
-  (history.rolls||[]).forEach(r=>renderRoll(r));
-  const gmB = $('gmBadge'); if (gmB) gmB.textContent = `GM: ${gm || '—'}`;
+  (history?.messages||[]).forEach(m=>renderChat(m));
+  (history?.rolls||[]).forEach(r=>renderRoll(r));
+  if ($('gmBadge')) $('gmBadge').textContent = `GM: ${gm || '—'}`;
   socket.emit('map_request');
   socket.emit('campaign_get');
-  wireCampaignButtons();
+  wireCampaignInputs();
 });
 
 socket.on('system', (t)=> log(escapeHtml(t), 'sys'));
@@ -452,46 +572,61 @@ socket.on('chat', (m)=> renderChat(m));
 socket.on('roll', (r)=> renderRoll(r));
 socket.on('error_message', (msg)=> log(`Error: ${escapeHtml(msg)}`, 'sys'));
 
-socket.on('characters', (obj)=> renderChars(obj));
+socket.on('characters', renderChars);
+
 socket.on('state', (state)=>{
-  const gmB = $('gmBadge'); if (gmB) gmB.textContent = `GM: ${state.gm || '—'}`;
-  const users = $('users');
-  if (users) users.innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
+  if ($('gmBadge')) $('gmBadge').textContent = `GM: ${state.gm || '—'}`;
+  if ($('users')) $('users').innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
-  if (state.campaign) renderCampaignState(state.campaign);
+  if (state.campaign) {
+    // stash GM name for gmControlsBar
+    CAMPAIGN.gm = state.gm || '';
+    renderCampaignState(state.campaign);
+  }
 });
 
-socket.on('map_state', (map)=>{
-  MAP = map; resizeCells(); drawMap();
-});
+socket.on('map_state', (map)=>{ MAP = map || MAP; resizeCells(); drawMap(); });
 socket.on('map_ping', ({x,y})=>{
   pings.push({ x,y, ts: Date.now() });
   drawMap(); renderPings();
 });
-socket.on('campaign_state', (c) => renderCampaignState(c));
 
-// ------- Theme toggle (CSP safe) -------
+/* Campaign events + flows */
+socket.on('campaign_state', (c)=> {
+  CAMPAIGN.gm = bySel('#gmBadge')?.textContent?.replace(/^GM:\s*/, '') || CAMPAIGN.gm || '';
+  renderCampaignState(c);
+});
+socket.on('campaign_started', ({ sceneId })=>{
+  CAMPAIGN.started = true;
+  log('Campaign started!', 'sys');
+  socket.emit('campaign_get'); // refresh full state
+});
+socket.on('character_required', ({ reason })=>{
+  // Prompt lightweight character creator
+  openCharacterPopup($('name')?.value.trim() || 'Hero');
+});
+
+socket.on('campaign_choice_requested', (payload)=>{
+  openConsentModal(payload);
+});
+
+/* ------- Theme toggle (CSP-safe) ------- */
 (() => {
   const root = document.documentElement;
   const saved = localStorage.getItem('theme');
   if (saved) root.dataset.theme = saved;
-
-  const btn = document.getElementById('themeToggle');
-  if (btn) {
-    btn.addEventListener('click', () => {
-      root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
-      localStorage.setItem('theme', root.dataset.theme);
-    });
-  }
+  const btn = $('themeToggle');
+  btn?.addEventListener('click', ()=>{
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', root.dataset.theme);
+  });
 })();
 
-// Init
+/* ------- Init draw + resize ------- */
 resizeCells(); drawMap();
 window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
-document.addEventListener('DOMContentLoaded', () => {
-  wireCampaignButtons();
-  document.querySelectorAll('.tab-btn').forEach(btn =>
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab))
-  );
+document.addEventListener('DOMContentLoaded', ()=>{
+  // Defensive re-wire (in case HTML loads later)
+  bySelAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 });
