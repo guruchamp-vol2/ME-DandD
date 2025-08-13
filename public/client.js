@@ -325,7 +325,7 @@ window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
 
 // If your tabs system exists already, this will enable a new tab button with data-tab="campTab"
 // and a panel with id="campTab". It gracefully no-ops if the elements aren't present.
-function $(id){ return document.getElementById(id); } // no-op if you already have $, safe to re-declare
+ // no-op if you already have $, safe to re-declare
 
 // UI helpers (re-use your existing ones if present)
 function _escape(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;')
@@ -446,3 +446,33 @@ document.addEventListener('DOMContentLoaded', wireCampaignButtons);
 socket.on?.('state', (state)=>{
   if (state?.campaign) renderCampaignState(state.campaign);
 });
+// ------- Theme toggle (moved from inline to satisfy CSP) -------
+(() => {
+  const root = document.documentElement;
+  const saved = localStorage.getItem('theme');
+  if (saved) root.dataset.theme = saved;
+
+  const btn = document.getElementById('themeToggle');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme', root.dataset.theme);
+    });
+  }
+})();
+
+// ------- Tab wiring (only if your existing code doesn't already do this) -------
+if (typeof document !== 'undefined') {
+  const tabs = document.querySelectorAll('.tab-btn');
+  if (tabs.length) {
+    tabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.panel-body').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        const panel = document.getElementById(btn.dataset.tab);
+        if (panel) panel.classList.add('active');
+      });
+    });
+  }
+}
