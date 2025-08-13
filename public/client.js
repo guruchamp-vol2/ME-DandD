@@ -169,19 +169,50 @@ function resizeCells(){
 }
 function drawMap(){
   ctx.clearRect(0,0,mapCanvas.width,mapCanvas.height);
+
+  // If tiles array isn't ready yet, don't crash—just clear canvases and return.
+  if (!Array.isArray(MAP.tiles) || MAP.tiles.length === 0) {
+    mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+    return;
+  }
+
   for (let y=0;y<MAP.h;y++){
     for (let x=0;x<MAP.w;x++){
-      if ((MAP.tiles[y]||[])[x]===1){
-        ctx.fillStyle = '#2b303b';
-        ctx.fillRect(x*cellW, y*cellH, cellW, cellH);
-      } else {
-        ctx.fillStyle = '#f9fafb';
-        ctx.fillRect(x*cellW, y*cellH, cellW, cellH);
-      }
+      const isWall = ((MAP.tiles[y] || [])[x] === 1);     // ✅ guard
+      ctx.fillStyle = isWall ? '#2b303b' : '#f9fafb';
+      ctx.fillRect(x*cellW, y*cellH, cellW, cellH);
       ctx.strokeStyle = '#e5e7eb';
       ctx.strokeRect(x*cellW, y*cellH, cellW, cellH);
     }
   }
+
+  // Tokens
+  Object.values(MAP.tokens||{}).forEach(t=>{
+    const cx = t.x*cellW + cellW/2, cy = t.y*cellH + cellH/2;
+    ctx.beginPath(); ctx.arc(cx,cy, Math.min(cellW,cellH)*0.35, 0, Math.PI*2);
+    ctx.fillStyle = t.color || '#222'; ctx.fill();
+    ctx.strokeStyle = '#111'; ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.floor(Math.min(cellW,cellH)*0.4)}px system-ui`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText((t.name||'?')[0]?.toUpperCase() || '?', cx, cy);
+  });
+
+  // Mini-map
+  mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+  const sx = miniCanvas.width / MAP.w, sy = miniCanvas.height / MAP.h;
+  for (let y=0;y<MAP.h;y++){
+    for (let x=0;x<MAP.w;x++){
+      const isWall = ((MAP.tiles[y] || [])[x] === 1);     // ✅ guard here too
+      mctx.fillStyle = isWall ? '#2b303b' : '#f9fafb';
+      mctx.fillRect(x*sx, y*sy, sx, sy);
+    }
+  }
+  Object.values(MAP.tokens||{}).forEach(t=>{
+    mctx.fillStyle = t.color || '#222';
+    mctx.fillRect(t.x*sx, t.y*sy, sx, sy);
+  });
+}
   Object.values(MAP.tokens||{}).forEach(t=>{
     const cx = t.x*cellW + cellW/2, cy = t.y*cellH + cellH/2;
     ctx.beginPath(); ctx.arc(cx,cy, Math.min(cellW,cellH)*0.35, 0, Math.PI*2);
@@ -205,7 +236,7 @@ function drawMap(){
     mctx.fillStyle = t.color || '#222';
     mctx.fillRect(t.x*sx, t.y*sy, sx, sy);
   });
-}
+
 
 let selectedTokenId = null;
 function pickTokenAt(mx,my){
