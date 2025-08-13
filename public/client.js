@@ -1,5 +1,5 @@
-/* Full client.js for D&D Lobbies: chat, dice, character customization, mini-map, and encounter tracker */
-const socket = io();
+/* Full client.js for D&D Lobbies: chat, dice, character customization, mini-map, encounter tracker, and campaign add-on (CSP safe) */
+const socket = io(); // requires /socket.io/socket.io.js loaded from same origin
 
 // ---------------- DOM helpers ----------------
 const $ = (id) => document.getElementById(id);
@@ -8,11 +8,14 @@ const log = (html, cls='') => {
   el.className = cls; el.innerHTML = html;
   $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight;
 };
+
+// Tabs helper (match .panel-body sections)
 const switchTab = (id) => {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
-  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id===id));
+  document.querySelectorAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
 };
-document.querySelectorAll('.tab-btn').forEach(btn => btn.onclick = () => switchTab(btn.dataset.tab));
+// Wire tabs
+document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 
 function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 function linkify(s){ return s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
@@ -65,9 +68,9 @@ const AB_IDS = ['STR','DEX','CON','INT','WIS','CHA'];
 const cost = (score) => {
   if (score < 8) return 0;
   if (score <= 13) return score - 8;
-  if (score === 14) return 7 + 2;   // +2 for 13→14
-  if (score === 15) return 9 + 2;   // +2 for 14→15
-  return 999; // invalid
+  if (score === 14) return 7 + 2;
+  if (score === 15) return 9 + 2;
+  return 999;
 };
 const totalCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt($('ab_'+id).value||8,10)), 0);
 const updatePoints = () => {
@@ -287,57 +290,15 @@ function renderEncounter(enc){
   });
 }
 
-// ---------------- Socket events ----------------
-socket.on('identified', ({ username })=> log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys'));
-socket.on('joined', ({ lobby, history, gm })=>{
-  $('log').innerHTML = '';
-  log(`Joined lobby <strong>${escapeHtml(lobby)}</strong>.`, 'sys');
-  (history.messages||[]).forEach(m=>renderChat(m));
-  (history.rolls||[]).forEach(r=>renderRoll(r));
-  $('gmBadge').textContent = `GM: ${gm || '—'}`;
-  socket.emit('map_request');
-});
-socket.on('system', (t)=> log(escapeHtml(t), 'sys'));
-socket.on('chat', (m)=> renderChat(m));
-socket.on('roll', (r)=> renderRoll(r));
-socket.on('error_message', (msg)=> log(`Error: ${escapeHtml(msg)}`, 'sys'));
-
-socket.on('characters', (obj)=> renderChars(obj));
-socket.on('state', (state)=>{
-  $('gmBadge').textContent = `GM: ${state.gm || '—'}`;
-  $('users').innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
-  renderChars(state.characters || {});
-  renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
-});
-
-socket.on('map_state', (map)=>{
-  MAP = map; resizeCells(); drawMap();
-});
-socket.on('map_ping', ({x,y,by})=>{
-  pings.push({ x,y, ts: Date.now() });
-  drawMap(); renderPings();
-});
-
-// Initial draw
-resizeCells(); drawMap();
-window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
-/* ---------------- Campaign / Story Mode (add-on) ---------------- */
-
-// If your tabs system exists already, this will enable a new tab button with data-tab="campTab"
-// and a panel with id="campTab". It gracefully no-ops if the elements aren't present.
- // no-op if you already have $, safe to re-declare
-
-// UI helpers (re-use your existing ones if present)
+// ---------------- Campaign / Story Mode ----------------
 function _escape(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;')
   .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 
 function ensureCampaignUI() {
-  // Bail if the page doesn't have the Campaign panel yet
-  if ($('campTab')) return true;
-  return false;
+  return !!$('campTab');
 }
 
-// Render
+// Render campaign UI
 function renderCampaignState(c){
   if (!ensureCampaignUI()) return;
 
@@ -370,24 +331,16 @@ function renderCampaignState(c){
     .map(n => `<div class="small"><strong>${_escape(n.by)}</strong>: ${_escape(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`)
     .join('');
 
-  // simple GM check: show tools if your GM badge contains your own name
+  // GM tools visibility heuristic
   const myNameGuess = document.querySelector('#users .pill')?.textContent?.replace(/^@/, '') || '';
   const gmText = document.getElementById('gmBadge')?.textContent || '';
   const isGM = gmText.includes(myNameGuess) || gmText.includes('You') || gmText.includes('(you)');
   const tools = $('gmTools'); if (tools) tools.style.display = isGM ? 'block' : 'none';
 }
 
-// Socket listeners (non-destructive)
-socket.on?.('campaign_state', (c) => renderCampaignState(c));
-
-// Ask for campaign on join (if your existing 'joined' listener exists,
-// this adds an extra request; harmless if duplicated)
-socket.emit?.('campaign_get');
-
-// Wire GM Tool buttons if present
+// Wire GM Tool buttons
 function wireCampaignButtons(){
   if (!ensureCampaignUI()) return;
-
   const byId = (i) => document.getElementById(i);
 
   byId('addNote')?.addEventListener('click', ()=>{
@@ -438,14 +391,49 @@ function wireCampaignButtons(){
   });
 }
 
-// Try to wire now and also after DOMContentLoaded
-wireCampaignButtons();
-document.addEventListener('DOMContentLoaded', wireCampaignButtons);
+// ---------------- Socket events ----------------
+socket.on('identified', ({ username })=> log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys'));
 
-// If your code emits a 'state' event already, append render here too (non-destructive)
-socket.on?.('state', (state)=>{
-  if (state?.campaign) renderCampaignState(state.campaign);
+socket.on('joined', ({ lobby, history, gm })=>{
+  $('log').innerHTML = '';
+  log(`Joined lobby <strong>${escapeHtml(lobby)}</strong>.`, 'sys');
+  (history.messages||[]).forEach(m=>renderChat(m));
+  (history.rolls||[]).forEach(r=>renderRoll(r));
+  $('gmBadge').textContent = `GM: ${gm || '—'}`;
+  socket.emit('map_request');
+  socket.emit('campaign_get');     // ask server for campaign state
+  wireCampaignButtons();           // ensure GM buttons wired
 });
+
+socket.on('system', (t)=> log(escapeHtml(t), 'sys'));
+socket.on('chat', (m)=> renderChat(m));
+socket.on('roll', (r)=> renderRoll(r));
+socket.on('error_message', (msg)=> log(`Error: ${escapeHtml(msg)}`, 'sys'));
+
+socket.on('characters', (obj)=> renderChars(obj));
+socket.on('state', (state)=>{
+  $('gmBadge').textContent = `GM: ${state.gm || '—'}`;
+  $('users').innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
+  renderChars(state.characters || {});
+  renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
+  if (state.campaign) renderCampaignState(state.campaign);
+});
+
+socket.on('map_state', (map)=>{
+  MAP = map; resizeCells(); drawMap();
+});
+socket.on('map_ping', ({x,y})=>{
+  pings.push({ x,y, ts: Date.now() });
+  drawMap(); renderPings();
+});
+
+// Campaign events
+socket.on('campaign_state', (c) => renderCampaignState(c));
+
+// Initial draw & resize
+resizeCells(); drawMap();
+window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
+
 // ------- Theme toggle (moved from inline to satisfy CSP) -------
 (() => {
   const root = document.documentElement;
@@ -461,18 +449,10 @@ socket.on?.('state', (state)=>{
   }
 })();
 
-// ------- Tab wiring (only if your existing code doesn't already do this) -------
-if (typeof document !== 'undefined') {
-  const tabs = document.querySelectorAll('.tab-btn');
-  if (tabs.length) {
-    tabs.forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.panel-body').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
-        const panel = document.getElementById(btn.dataset.tab);
-        if (panel) panel.classList.add('active');
-      });
-    });
-  }
-}
+// ------- Extra Tab wiring safety (if DOM loaded later) -------
+document.addEventListener('DOMContentLoaded', () => {
+  wireCampaignButtons();
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+});

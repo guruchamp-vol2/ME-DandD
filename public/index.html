@@ -6,10 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- Styles -->
     <link rel="stylesheet" href="/styles.css" />
-    <!-- Socket.io (needed by client.js) -->
-    <!-- ADD this (served by your server at /socket.io/socket.io.js) -->
-<script src="/socket.io/socket.io.js"></script>
-
+    <!-- Socket.io (same origin to satisfy CSP) -->
+    <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
     <!-- App chrome -->
@@ -175,7 +173,7 @@
               <button class="btn ghost" id="addToken">Add My Token</button>
               <input id="tokenName" class="w-20" placeholder="Token name">
               <input id="tokenColor" type="color" value="#222222" class="color">
-              <button class="btn ghost" id="removeToken">Remove Selected</button>
+              <button id="removeToken">Remove Selected</button>
               <button class="btn ghost" id="pingBtn">Ping</button>
               <canvas id="miniCanvas" width="180" height="180" class="mini"></canvas>
             </div>
@@ -216,7 +214,7 @@
           </div>
         </div>
 
-        <!-- Campaign (works with my add-on or your extended client.js) -->
+        <!-- Campaign -->
         <div id="campTab" class="panel-body">
           <div class="grid cols-1 cols-2@lg gap-12">
             <div class="vstack gap-12">
@@ -296,7 +294,7 @@
       <div class="muted">Create a lobby with a password to become GM. Build your story with scenes, choices, handouts, and quests.</div>
     </footer>
 
-    <!-- Your existing client file (keep the same) -->
+    <!-- App logic -->
     <script src="/client.js"></script>
-
-    
+  </body>
+</html>
