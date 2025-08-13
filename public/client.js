@@ -1,7 +1,10 @@
-/* D&D Lobbies — full client.js (works with consent + start-lock + character popup) */
-/* Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file */
+/* D&D Lobbies — client.js (chunk 1/3)
+   Works with start-lock, character popup, and consent flow.
+   Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
+*/
 
 const socket = io();
+let CAMPAIGN = { started:false, currentSceneId:null, pendingChoice:null, gm:'' };
 
 /* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
@@ -235,7 +238,6 @@ function renderChars(charsObj){
     tbody.appendChild(tr);
   });
 }
-
 /* ---------------- Map ---------------- */
 let MAP = { w:20, h:20, tiles:[], tokens:{} };
 const mapCanvas = $('mapCanvas');
@@ -269,6 +271,7 @@ function drawMap(){
     }
   }
 
+  // Tokens
   Object.values(MAP.tokens||{}).forEach(t=>{
     const cx = t.x*cellW + cellW/2, cy = t.y*cellH + cellH/2;
     ctx.beginPath(); ctx.arc(cx,cy, Math.min(cellW,cellH)*0.35, 0, Math.PI*2);
@@ -280,6 +283,7 @@ function drawMap(){
     ctx.fillText((t.name||'?')[0]?.toUpperCase() || '?', cx, cy);
   });
 
+  // Mini-map
   mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
   const sx = miniCanvas.width / (MAP.w || 1), sy = miniCanvas.height / (MAP.h || 1);
   for (let y=0;y<MAP.h;y++){
@@ -379,11 +383,8 @@ function renderEncounter(enc){
   });
 }
 
-/* ---------------- Campaign: start-lock, consent, UI ---------------- */
-let CAMPAIGN = { started:false, currentSceneId:null, pendingChoice:null };
-
+/* ---------------- Campaign UI helpers ---------------- */
 function gmControlsBar(isGM) {
-  // inject or update a small control row in Campaign panel
   const tab = $('campTab'); if (!tab) return;
   let bar = bySel('[data-gmbar]', tab);
   if (!bar) {
@@ -422,7 +423,6 @@ function renderCampaignState(c){
 
   // Choices
   choicesWrap.innerHTML = '';
-  const isGM = $('gmBadge')?.textContent?.includes(': ') && $('gmBadge').textContent.endsWith(CAMPAIGN?.gm);
   const gmName = $('gmBadge')?.textContent?.replace(/^GM:\s*/, '') || '';
   const amGM = gmName && bySel('#users .pill')?.textContent?.slice(1) === gmName;
 
@@ -478,7 +478,6 @@ function wireCampaignInputs(){
     socket.emit('campaign_quest_add', { title: t });
   });
 }
-
 /* ---------------- Character Creator Popup ---------------- */
 function openCharacterPopup(prefillName=''){
   const body = document.createElement('div');
@@ -541,7 +540,7 @@ function openCharacterPopup(prefillName=''){
 /* ---------------- Consent Modal ---------------- */
 function openConsentModal({ text, requestedBy }){
   const body = document.createElement('div');
-  body.innerHTML = `<p>${escapeHtml(requestedBy)} proposes: <strong>${escapeHtml(text)}</strong></p>
+  body.innerHTML = `<p>${escapeHtml(requestedBy || 'GM')} proposes: <strong>${escapeHtml(text)}</strong></p>
   <p class="small muted">Everyone must accept (or the GM can force after ~30s).</p>`;
   const cancel = makeBtn('Not Yet', { ghost:true });
   cancel.addEventListener('click', hideModal);
@@ -580,7 +579,6 @@ socket.on('state', (state)=>{
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
   if (state.campaign) {
-    // stash GM name for gmControlsBar
     CAMPAIGN.gm = state.gm || '';
     renderCampaignState(state.campaign);
   }
@@ -594,7 +592,7 @@ socket.on('map_ping', ({x,y})=>{
 
 /* Campaign events + flows */
 socket.on('campaign_state', (c)=> {
-  CAMPAIGN.gm = bySel('#gmBadge')?.textContent?.replace(/^GM:\s*/, '') || CAMPAIGN.gm || '';
+  CAMPAIGN.gm = document.querySelector('#gmBadge')?.textContent?.replace(/^GM:\s*/, '') || CAMPAIGN.gm || '';
   renderCampaignState(c);
 });
 socket.on('campaign_started', ({ sceneId })=>{
@@ -603,10 +601,8 @@ socket.on('campaign_started', ({ sceneId })=>{
   socket.emit('campaign_get'); // refresh full state
 });
 socket.on('character_required', ({ reason })=>{
-  // Prompt lightweight character creator
   openCharacterPopup($('name')?.value.trim() || 'Hero');
 });
-
 socket.on('campaign_choice_requested', (payload)=>{
   openConsentModal(payload);
 });
@@ -627,6 +623,9 @@ socket.on('campaign_choice_requested', (payload)=>{
 resizeCells(); drawMap();
 window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
 document.addEventListener('DOMContentLoaded', ()=>{
-  // Defensive re-wire (in case HTML loads later)
-  bySelAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+    const id = btn.dataset.tab; 
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
+    document.querySelectorAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
+  }));
 });

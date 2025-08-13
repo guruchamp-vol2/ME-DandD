@@ -1,0 +1,303 @@
+{
+  "title": "Legends of Eldoria: The Ember Crown",
+  "summary": "A sweeping Dungeons & Dragons campaign spanning bustling cities, treacherous dungeons, ancient forests, and the lairs of terrible dragons. Players will face traps, solve puzzles, bargain with mystical beings, and decide the fate of the realm.",
+  "currentSceneId": "s_intro",
+  "scenes": [
+    {
+      "id": "s_intro",
+      "title": "The Call to Adventure",
+      "content": "The village of Brindlemark bustles with the Spring Festival, but a messenger from the capital arrives with dire news \u2014 the Ember Crown, an artifact of immense power, has been stolen. The thief fled toward the Whispering Woods.",
+      "choices": [
+        {
+          "text": "Gather supplies in the marketplace",
+          "to": "s_market"
+        },
+        {
+          "text": "Set off immediately toward the woods",
+          "to": "s_woods_edge"
+        }
+      ]
+    },
+    {
+      "id": "s_market",
+      "title": "Brindlemark Marketplace",
+      "content": "Merchants shout their wares: fresh bread, sturdy rope, a mysterious potion seller. You can buy gear, hear rumors, or try your luck with a shady gambler.",
+      "choices": [
+        {
+          "text": "Buy supplies",
+          "to": "s_supplies"
+        },
+        {
+          "text": "Talk to townsfolk for rumors",
+          "to": "s_rumors"
+        },
+        {
+          "text": "Leave for the woods",
+          "to": "s_woods_edge"
+        }
+      ]
+    },
+    {
+      "id": "s_supplies",
+      "title": "General Supplies",
+      "content": "You spend some gold to pick up rations, rope, and a healing salve. The shopkeeper warns you of strange lights in the woods at night.",
+      "choices": [
+        {
+          "text": "Return to the marketplace",
+          "to": "s_market"
+        },
+        {
+          "text": "Head to the woods",
+          "to": "s_woods_edge"
+        }
+      ]
+    },
+    {
+      "id": "s_rumors",
+      "title": "Tavern Gossip",
+      "content": "At the tavern, a farmer swears he saw a hooded figure vanish into a hidden path. A bard whispers that the Ember Crown can control dragons.",
+      "choices": [
+        {
+          "text": "Return to the marketplace",
+          "to": "s_market"
+        },
+        {
+          "text": "Head to the woods",
+          "to": "s_woods_edge"
+        }
+      ]
+    },
+    {
+      "id": "s_woods_edge",
+      "title": "The Whispering Woods Edge",
+      "content": "Towering trees loom ahead, their branches swaying without wind. A narrow path leads deeper, but a glint of metal catches your eye off-trail.",
+      "choices": [
+        {
+          "text": "Follow the main path",
+          "to": "s_forest_path"
+        },
+        {
+          "text": "Investigate the glint",
+          "to": "s_trap"
+        }
+      ]
+    },
+    {
+      "id": "s_trap",
+      "title": "Goblin Snare",
+      "content": "Too late! A hidden snare yanks you upside-down. Goblins emerge, grinning. They demand your gold to set you free.",
+      "choices": [
+        {
+          "text": "Pay the goblins",
+          "to": "s_forest_path"
+        },
+        {
+          "text": "Fight back",
+          "to": "s_goblin_fight"
+        }
+      ]
+    },
+    {
+      "id": "s_goblin_fight",
+      "title": "Goblin Ambush",
+      "content": "You draw your weapon and the fight begins! After a tense battle, you free yourself and find a small pouch of coins.",
+      "choices": [
+        {
+          "text": "Continue down the path",
+          "to": "s_forest_path"
+        }
+      ]
+    },
+    {
+      "id": "s_forest_path",
+      "title": "Deep in the Whispering Woods",
+      "content": "The forest darkens. Faint singing lures you toward a moonlit glade. Will you investigate or stay on course?",
+      "choices": [
+        {
+          "text": "Investigate the singing",
+          "to": "s_fae_glade"
+        },
+        {
+          "text": "Ignore and continue",
+          "to": "s_ruins"
+        }
+      ]
+    },
+    {
+      "id": "s_fae_glade",
+      "title": "The Fae Glade",
+      "content": "Fae folk dance in a ring of mushrooms. They offer you a bargain: aid them in recovering a stolen crystal, and they'll grant a boon.",
+      "choices": [
+        {
+          "text": "Accept the bargain",
+          "to": "s_fae_quest"
+        },
+        {
+          "text": "Refuse politely",
+          "to": "s_ruins"
+        }
+      ]
+    },
+    {
+      "id": "s_fae_quest",
+      "title": "The Stolen Crystal",
+      "content": "The fae guide you to a goblin cave where the crystal is guarded by traps. You must solve a puzzle to retrieve it.",
+      "choices": [
+        {
+          "text": "Solve the puzzle",
+          "to": "s_fae_reward"
+        },
+        {
+          "text": "Leave the cave",
+          "to": "s_ruins"
+        }
+      ]
+    },
+    {
+      "id": "s_fae_reward",
+      "title": "Fae Reward",
+      "content": "The fae are delighted and grant you enchanted boots that silence your steps. They point you toward the ruins.",
+      "choices": [
+        {
+          "text": "Go to the ruins",
+          "to": "s_ruins"
+        }
+      ]
+    },
+    {
+      "id": "s_ruins",
+      "title": "Ancient Ruins",
+      "content": "Crumbling walls and overgrown statues mark this forgotten place. An entrance to the catacombs yawns darkly ahead.",
+      "choices": [
+        {
+          "text": "Enter the catacombs",
+          "to": "s_catacombs"
+        },
+        {
+          "text": "Search the area",
+          "to": "s_ruins_loot"
+        }
+      ]
+    },
+    {
+      "id": "s_ruins_loot",
+      "title": "Hidden Cache",
+      "content": "Behind a fallen statue, you find a chest with gold and a strange amulet. It hums faintly with magic.",
+      "choices": [
+        {
+          "text": "Enter the catacombs",
+          "to": "s_catacombs"
+        }
+      ]
+    },
+    {
+      "id": "s_catacombs",
+      "title": "The Catacombs",
+      "content": "Dusty halls echo with distant roars. Skeletons stir from the shadows as you pass.",
+      "choices": [
+        {
+          "text": "Fight the skeletons",
+          "to": "s_skeleton_fight"
+        },
+        {
+          "text": "Run deeper",
+          "to": "s_dragon_gate"
+        }
+      ]
+    },
+    {
+      "id": "s_skeleton_fight",
+      "title": "Skeleton Battle",
+      "content": "You clash with the undead, shattering bone and steel. A hidden door opens after the last falls.",
+      "choices": [
+        {
+          "text": "Through the hidden door",
+          "to": "s_dragon_gate"
+        }
+      ]
+    },
+    {
+      "id": "s_dragon_gate",
+      "title": "The Dragon's Gate",
+      "content": "An immense stone door carved with a dragon motif blocks your path. The amulet from earlier fits perfectly into a slot.",
+      "choices": [
+        {
+          "text": "Use the amulet",
+          "to": "s_dragon_lair"
+        }
+      ]
+    },
+    {
+      "id": "s_dragon_lair",
+      "title": "Dragon's Lair",
+      "content": "The red dragon Vyrathyx coils atop a mountain of treasure, the Ember Crown gleaming on its brow. The final battle awaits.",
+      "choices": [
+        {
+          "text": "Challenge the dragon",
+          "to": "s_final_battle"
+        },
+        {
+          "text": "Try to negotiate",
+          "to": "s_dragon_talk"
+        }
+      ]
+    },
+    {
+      "id": "s_dragon_talk",
+      "title": "Parley with Vyrathyx",
+      "content": "Vyrathyx listens, amused. The dragon offers a deal: spare its life and keep the Crown safe from others, in exchange for a favor owed.",
+      "choices": [
+        {
+          "text": "Accept the deal",
+          "to": "s_ending_peace"
+        },
+        {
+          "text": "Refuse and fight",
+          "to": "s_final_battle"
+        }
+      ]
+    },
+    {
+      "id": "s_final_battle",
+      "title": "Final Battle",
+      "content": "Steel clashes with scale, fire fills the air. At last, with a final strike, the Crown is yours.",
+      "choices": [
+        {
+          "text": "Claim your victory",
+          "to": "s_ending_victory"
+        }
+      ]
+    },
+    {
+      "id": "s_ending_victory",
+      "title": "Victory!",
+      "content": "With the Ember Crown in hand, you are hailed as heroes across Eldoria.",
+      "choices": []
+    },
+    {
+      "id": "s_ending_peace",
+      "title": "A Fragile Peace",
+      "content": "You and Vyrathyx part ways, an uneasy alliance forged. The realm is safe\u2026 for now.",
+      "choices": []
+    }
+  ],
+  "handouts": [
+    {
+      "title": "The Ember Crown",
+      "content": "An ancient artifact said to control dragons."
+    },
+    {
+      "title": "Fae Bargain",
+      "content": "A pact with the fae, offering magical aid in exchange for service."
+    }
+  ],
+  "quests": [
+    {
+      "title": "Recover the Ember Crown"
+    },
+    {
+      "title": "Aid the Fae in recovering their stolen crystal"
+    }
+  ],
+  "notes": []
+}

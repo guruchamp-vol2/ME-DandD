@@ -1,4 +1,6 @@
-// server.js — D&D Lobbies (Render-ready, CSP-safe, with start-lock + consent flow)
+ // server.js — D&D Lobbies (CSP-safe, start-lock + consent flow, client parity)
+
+// ===== Imports & Setup =====
 import 'dotenv/config';
 import express from 'express';
 import http from 'http';
@@ -22,13 +24,15 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json());
 
-// ---------- Persistence (optional Mongo) ----------
+// ===== Optional Mongo persistence =====
 const useMongo = !!process.env.MONGODB_URI;
 let mongoClient = null, db = null;
 async function persist(col, doc){ if (useMongo) await db.collection(col).insertOne(doc); }
-async function upsertLobbyMeta(name, changes){ if (useMongo) await db.collection('lobbies').updateOne({name},{ $set:{name, ...changes}}, {upsert:true}); }
+async function upsertLobbyMeta(name, changes){
+  if (useMongo) await db.collection('lobbies').updateOne({name},{ $set:{name, ...changes}}, {upsert:true});
+}
 
-// ---------- Helpers ----------
+// ===== Helpers =====
 const nowISO = () => new Date().toISOString();
 const safe = (s, max=120) => String(s ?? '').trim().slice(0, max);
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -47,7 +51,7 @@ const verifyPass = (plain, stored) => {
   return crypto.timingSafeEqual(Buffer.from(hashHex, 'hex'), test);
 };
 
-// ---------- Dice ----------
+// ===== Dice =====
 const DICE_ADV = /^(\d*)d(\d+)(k[hl](\d+))?([+\-]\d+)?$/i;
 function rollAdvanced(exprRaw) {
   const expr = safe(exprRaw, 40).replace(/\s+/g,'').toLowerCase();
@@ -68,52 +72,50 @@ function rollAdvanced(exprRaw) {
   return { expression: exprRaw, rolls, used, modifier: mod, total };
 }
 
-// ---------- State ----------
+// ===== In-memory state & defaults =====
 const memory = { lobbies: new Map() };
 const defaultMap = () => ({ w: 20, h: 20, tiles: Array.from({length:20}, () => Array(20).fill(0)), tokens: {} });
 const defaultCampaign = () => ({
   title: 'Embers of Argeth',
-  summary: 'A starter mini-campaign that ships with this app. Play through to test the Campaign tab & choices.',
+  summary: 'Starter mini-campaign to verify scenes & consent flow.',
   scenes: [
-    { id: 's_intro', title: 'Arrival in Graywick', content: 'You reach the foggy mining town of Graywick. A notice board mentions escort work and missing caravans.', choices: [
+    { id: 's_intro', title: 'Arrival in Graywick', content: 'Foggy mining town; escort job & missing caravans.', choices: [
       { id: 'c_intro_tavern', text: 'Head to the Burnt Anvil tavern', to: 's_tavern' },
       { id: 'c_intro_board',  text: 'Study the notice board',        to: 's_board'  }
     ]},
-    { id: 's_tavern', title: 'The Burnt Anvil', content: 'A grizzled foreman offers 10 gp each to guard a wagon to the riverside mill at dawn.', choices: [
-      { id: 'c_tavern_accept', text: 'Accept the job (escort quest)', to: 's_road' },
-      { id: 'c_tavern_market', text: 'Wander the night market',       to: 's_market' }
+    { id: 's_tavern', title: 'The Burnt Anvil', content: 'Foreman offers 10 gp each to guard a wagon at dawn.', choices: [
+      { id: 'c_tavern_accept', text: 'Accept the job (escort)', to: 's_road' },
+      { id: 'c_tavern_market', text: 'Wander the night market', to: 's_market' }
     ]},
-    { id: 's_board', title: 'Notice Board', content: 'Multiple caravans are late. Witnesses whisper about red-eyed goblins near the Old Road.', choices: [
+    { id: 's_board', title: 'Notice Board', content: 'Late caravans; red-eyed goblins near the Old Road.', choices: [
       { id: 'c_board_investigate', text: 'Investigate the Old Road', to: 's_road' },
-      { id: 'c_board_ignore',      text: 'Ignore and find rumors',   to: 's_market' }
+      { id: 'c_board_ignore',      text: 'Ask around the market',    to: 's_market' }
     ]},
-    { id: 's_market', title: 'Night Market', content: 'Lanterns sway, traders haggle. A sailor swears the ruined lighthouse glows at midnight.', choices: [
+    { id: 's_market', title: 'Night Market', content: 'Lanterns sway; rumors of a glowing lighthouse.', choices: [
       { id: 'c_market_lighthouse', text: 'Scout the lighthouse', to: 's_lighthouse' },
-      { id: 'c_market_sleep',      text: 'Rest and take the escort job', to: 's_road' }
+      { id: 'c_market_sleep',      text: 'Rest then escort',     to: 's_road' }
     ]},
-    { id: 's_road', title: 'Ambush on the Old Road', content: 'Rain slicks the stones. Goblins spring from the brush! After the skirmish, tracks lead into the woods.', choices: [
+    { id: 's_road', title: 'Ambush on the Old Road', content: 'Goblins attack; tracks lead into woods.', choices: [
       { id: 'c_road_track',  text: 'Follow the tracks', to: 's_cave' },
-      { id: 'c_road_help',   text: 'Help the wounded, return to town', to: 's_graywick' }
+      { id: 'c_road_help',   text: 'Help wounded, return', to: 's_graywick' }
     ]},
-    { id: 's_cave', title: 'Gloomroot Cave', content: 'Mushrooms glow faintly. Captives plead from wicker cages. A crude idol hums with heat.', choices: [
-      { id: 'c_cave_rescue', text: 'Rescue the captives', to: 's_reward' },
-      { id: 'c_cave_idol',   text: 'Smash the idol',      to: 's_reward' }
+    { id: 's_cave', title: 'Gloomroot Cave', content: 'Glowing mushrooms, captives, a humming idol.', choices: [
+      { id: 'c_cave_rescue', text: 'Rescue captives', to: 's_reward' },
+      { id: 'c_cave_idol',   text: 'Smash the idol',  to: 's_reward' }
     ]},
-    { id: 's_lighthouse', title: 'Ruined Lighthouse', content: 'Wind howls through broken windows. Below, a sealed hatch marks an old vault bearing the sigil of Argeth.', choices: [
+    { id: 's_lighthouse', title: 'Ruined Lighthouse', content: 'Sealed hatch; old vault of Argeth.', choices: [
       { id: 'c_lh_descend', text: 'Descend into the vault', to: 's_reward' }
     ]},
-    { id: 's_graywick', title: 'Back to Graywick', content: 'The town thanks you. The foreman suggests returning to the road to finish the job.', choices: [
+    { id: 's_graywick', title: 'Back to Graywick', content: 'Thanks & hints to finish the job.', choices: [
       { id: 'c_graywick_road', text: 'Return to the Old Road', to: 's_road' }
     ]},
-    { id: 's_reward', title: 'Aftermath', content: 'With the threat blunted, the town offers coin and rumors of a deeper power called the Ember Crown.', choices: []}
+    { id: 's_reward', title: 'Aftermath', content: 'Coin; rumors of the Ember Crown.', choices: []}
   ],
   currentSceneId: 's_intro',
-  handouts: [
-    { id: 'h_notice', title: 'Notice Board', content: 'Escort needed: guard a wagon to the mill at dawn. Pay: 10 gp each.' }
-  ],
+  handouts: [{ id: 'h_notice', title: 'Notice Board', content: 'Escort to mill at dawn. Pay: 10 gp each.' }],
   quests: [
-    { id: 'q_escort',  title: 'Escort the supply wagon to the mill', done: false },
-    { id: 'q_goblins', title: 'Discover why caravans are missing',   done: false }
+    { id: 'q_escort',  title: 'Escort the supply wagon', done: false },
+    { id: 'q_goblins', title: 'Find the missing caravans', done: false }
   ],
   notes: []
 });
@@ -122,10 +124,8 @@ function defaultSettings(){
   return {
     lockedUntilStart: true,      // players blocked until GM starts
     campaignStarted: false,
-    requireCharacter: true,      // client will prompt; server validates
-    consent: {                   // for GM choices
-      pending: null,             // { choiceId, text, to, approvals:Set<username>, requestedAt }
-    }
+    requireCharacter: true,      // client prompts; server validates on actions
+    consent: { pending: null }   // { choiceId, text, to, approvals:Set<username>, requestedAt }
   };
 }
 
@@ -150,7 +150,7 @@ function ensureLobby(name) {
   return memory.lobbies.get(name);
 }
 
-// ---------- API ROUTES (place BEFORE catch-all!) ----------
+// ===== API (before static) =====
 app.get('/health', (req,res)=> res.json({ok:true, useMongo}));
 app.get('/lobbies', async (req,res)=>{
   if (useMongo) {
@@ -160,15 +160,14 @@ app.get('/lobbies', async (req,res)=>{
   res.json([...memory.lobbies.keys()]);
 });
 
-// ---------- Static (after API) ----------
+// ===== Static & SPA =====
 app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }));
 app.get('/', (req,res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-// Catch-all LAST so it won’t swallow /lobbies JSON
 app.get('*', (req,res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const PORT = process.env.PORT || 10000;
 
-// ---------- Sockets ----------
+// ===== Sockets =====
 io.on('connection', (socket)=>{
   let username = 'Anon';
   let lobby = null;
@@ -177,7 +176,6 @@ io.on('connection', (socket)=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     const users = [...L.users.values()].map(u=>u.name);
-    const hasChar = Object.fromEntries(users.map(u => [u, L.characters.has(u)]));
     io.to(lobby).emit('state', {
       users,
       gm: L.gm,
@@ -234,21 +232,25 @@ io.on('connection', (socket)=>{
     emitState(); emitMap();
   });
 
-  // Utility: are players allowed to act (based on start lock)?
+  // Small helpers for later handlers
   function isLockedForPlayers(L) {
     return L.settings.lockedUntilStart && !L.settings.campaignStarted;
   }
   function isGM(L){ return L.gm === username; }
-
-  // ---------- Chat & Roll ----------
+    // ===== Chat & Roll =====
   socket.on('chat', async ({text})=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     const msg = safe(text, 500);
     if (!msg) return;
 
-    // Commands
+    // Commands parsed server-side
     if (msg.startsWith('/')) { await handleCommand(L, msg); return; }
+
+    if (isLockedForPlayers(L) && !isGM(L)) {
+      socket.emit('error_message','Campaign not started by GM yet.');
+      return;
+    }
 
     const payload = { user: username, text: msg, ts: nowISO() };
     io.to(lobby).emit('chat', payload);
@@ -267,13 +269,13 @@ io.on('connection', (socket)=>{
     }catch(e){ socket.emit('error_message', e.message || 'Bad dice expression.'); }
   });
 
-  // ---------- Characters ----------
+  // ===== Characters =====
   socket.on('character_upsert', (sheet)=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     const gm = isGM(L);
     const target = safe(sheet?.name || username, 24);
-    if (!gm && target !== username) return;
+    if (!gm && target !== username) { socket.emit('error_message','You can only edit your own sheet.'); return; }
 
     const ab = sheet?.abilities || {};
     const abilities = {
@@ -311,14 +313,14 @@ io.on('connection', (socket)=>{
     const L = ensureLobby(lobby);
     const target = safe(name || username, 24);
     const gm = isGM(L);
-    if (!gm && target !== username) return;
+    if (!gm && target !== username) { socket.emit('error_message','You can only remove your own sheet.'); return; }
     L.characters.delete(target);
     io.to(lobby).emit('system', `${username} removed ${target}'s sheet`);
     io.to(lobby).emit('characters', Object.fromEntries([...L.characters.entries()]));
     emitState();
   });
 
-  // ---------- Map ----------
+  // ===== Map =====
   socket.on('map_request', ()=> { if (lobby) emitMap(); });
 
   socket.on('map_init', ({w,h})=>{
@@ -338,6 +340,7 @@ io.on('connection', (socket)=>{
     if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
     const {w,h} = L.map;
     x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
+    if (!Array.isArray(L.map.tiles[y])) return;
     L.map.tiles[y][x] = val ? 1 : 0;
     emitMap();
   });
@@ -346,14 +349,12 @@ io.on('connection', (socket)=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     if (isLockedForPlayers(L) && !isGM(L)) { socket.emit('error_message','Campaign not started by GM yet.'); return; }
-    if (L.settings.requireCharacter && !L.characters.has(username)) { socket.emit('error_message','Create your character first.'); return; }
-
     const {w,h} = L.map;
     const tid = safe(id||`t_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, 40);
     const nm = safe(name || username, 24);
     let x=0,y=0;
     outer: for (let yy=0; yy<h; yy++) for (let xx=0; xx<w; xx++) {
-      if (L.map.tiles[yy][xx]===0 && !Object.values(L.map.tokens).some(t=>t.x===xx&&t.y===yy)) { x=xx; y=yy; break outer; }
+      if ((L.map.tiles[yy]?.[xx] ?? 0)===0 && !Object.values(L.map.tokens).some(t=>t.x===xx&&t.y===yy)) { x=xx; y=yy; break outer; }
     }
     L.map.tokens[tid] = { id:tid, name:nm, x, y, color: safe(color||'#222', 16), owner: username };
     emitMap();
@@ -368,7 +369,7 @@ io.on('connection', (socket)=>{
     if (!isGM(L) && tok.owner !== username) { socket.emit('error_message','Only owner or GM can move this token.'); return; }
     const {w,h,tiles} = L.map;
     x = clamp(parseInt(x,10)||0, 0, w-1); y = clamp(parseInt(y,10)||0, 0, h-1);
-    if (tiles[y][x]===1) return; // wall
+    if ((tiles?.[y]?.[x] ?? 0)===1) return; // wall
     tok.x = x; tok.y = y;
     emitMap();
   });
@@ -402,108 +403,75 @@ io.on('connection', (socket)=>{
     io.to(lobby).emit('map_ping', { x, y, by: username, ts: nowISO() });
   });
 
-  // ---------- Campaign / Story sockets ----------
+  // ===== Campaign: start & consent =====
   socket.on('campaign_get', ()=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     socket.emit('campaign_state', L.campaign);
   });
 
-  // GM starts the campaign
-  socket.on('gm_start_campaign', ()=>{
+  socket.on('campaign_start', ()=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
+    if (L.settings.campaignStarted) { socket.emit('error_message','Campaign already started.'); return; }
     L.settings.campaignStarted = true;
     io.to(lobby).emit('system', 'GM started the campaign!');
-    io.to(lobby).emit('campaign_started', { at: nowISO() });
+    io.to(lobby).emit('campaign_started', { sceneId: L.campaign.currentSceneId });
+    // Ping users without characters
+    for (const [sid, u] of L.users.entries()){
+      if (!L.characters.has(u.name)) io.to(sid).emit('character_required', { reason: 'campaign_started' });
+    }
     emitState();
   });
 
-  // Campaign meta
-  socket.on('campaign_update_meta', ({title, summary})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    if (title) L.campaign.title = safe(title, 120);
-    if (summary!=null) L.campaign.summary = safe(summary, 2000);
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  socket.on('campaign_scene_add', ({title, content})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    const scene = { id: randId('scn'), title: safe(title||'New Scene',120), content: safe(content||'', 4000), choices: [] };
-    L.campaign.scenes.push(scene);
-    if (!L.campaign.currentSceneId) L.campaign.currentSceneId = scene.id;
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  socket.on('campaign_scene_set', ({sceneId})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    if (L.campaign.scenes.some(s=>s.id===sceneId)){
-      L.campaign.currentSceneId = sceneId;
-      io.to(lobby).emit('system', `Scene changed to: ${sceneId}`);
-      io.to(lobby).emit('campaign_state', L.campaign);
-    }
-  });
-
-  socket.on('campaign_choice_add', ({sceneId, text, to})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    const scene = L.campaign.scenes.find(s=>s.id===sceneId);
-    if (!scene) return;
-    scene.choices.push({ id: randId('ch'), text: safe(text||'Choice', 200), to: safe(to||'', 120) });
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  // === Consent Flow ===
   socket.on('campaign_choice_request', ({choiceId})=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
+    if (!L.settings.campaignStarted) { socket.emit('error_message','Start campaign first.'); return; }
+
     const scene = L.campaign.scenes.find(s=>s.id===L.campaign.currentSceneId);
     if (!scene) return;
     const choice = scene.choices.find(c=>c.id===choiceId);
-    if (!choice) return;
+    if (!choice) { socket.emit('error_message','Choice not found.'); return; }
 
-    const approvals = new Set(); // approvals from non-GM users
-    L.settings.consent.pending = { choiceId, text: choice.text, to: choice.to, approvals, requestedAt: Date.now() };
+    L.settings.consent.pending = {
+      choiceId: choice.id, text: choice.text, to: choice.to,
+      approvals: new Set(), requestedAt: Date.now()
+    };
 
-    // Notify everyone to show consent popup
     const players = [...L.users.values()].map(u=>u.name).filter(n => n !== L.gm);
-    io.to(lobby).emit('consent_request', { choiceId, text: choice.text, to: choice.to, players });
+    io.to(lobby).emit('campaign_choice_requested', {
+      sceneId: scene.id, choiceId: choice.id, text: choice.text, to: choice.to, requestedBy: username, players
+    });
+    emitState();
   });
 
-  socket.on('consent_vote', ({choiceId, approve})=>{
+  socket.on('campaign_choice_ack', ()=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     const pending = L.settings.consent.pending;
-    if (!pending || pending.choiceId !== choiceId) return;
+    if (!pending) return;
 
-    if (approve) pending.approvals.add(username);
-    // Compute if all non-GM users have approved
+    pending.approvals.add(username);
+    // Everyone except GM must approve (or 30s timeout handled client-side by GM via force)
     const nonGM = [...L.users.values()].map(u=>u.name).filter(n => n !== L.gm);
     const allApproved = nonGM.every(n => pending.approvals.has(n));
-    io.to(lobby).emit('consent_progress', { approvals: [...pending.approvals] });
 
     if (allApproved) {
-      // Advance scene
       const target = L.campaign.scenes.find(s=>s.id===pending.to);
       if (target) {
         L.campaign.currentSceneId = target.id;
-        io.to(lobby).emit('system', `All players approved: "${pending.text}"`);
+        io.to(lobby).emit('system', `Choice accepted: ${pending.text}`);
         io.to(lobby).emit('campaign_state', L.campaign);
       }
       L.settings.consent.pending = null;
+      emitState();
     }
   });
 
-  socket.on('consent_force', ()=>{
+  socket.on('campaign_choice_force', ()=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
     if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
@@ -512,66 +480,13 @@ io.on('connection', (socket)=>{
     const target = L.campaign.scenes.find(s=>s.id===pending.to);
     if (target) {
       L.campaign.currentSceneId = target.id;
-      io.to(lobby).emit('system', `GM forced proceed: "${pending.text}"`);
+      io.to(lobby).emit('system', `GM forced proceed: ${pending.text}`);
       io.to(lobby).emit('campaign_state', L.campaign);
     }
     L.settings.consent.pending = null;
+    emitState();
   });
-
-  // Legacy “instant pick” (still allowed for GM, if you don’t want consent)
-  socket.on('campaign_choice_pick', ({choiceId})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    const scene = L.campaign.scenes.find(s=>s.id===L.campaign.currentSceneId);
-    if (!scene) return;
-    const choice = scene.choices.find(c=>c.id===choiceId);
-    if (choice && choice.to){
-      const target = L.campaign.scenes.find(s=>s.id===choice.to);
-      if (target){
-        L.campaign.currentSceneId = target.id;
-        io.to(lobby).emit('system', `${username} chose: ${choice.text}`);
-        io.to(lobby).emit('campaign_state', L.campaign);
-      }
-    }
-  });
-
-  socket.on('campaign_handout_add', ({title, content})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    L.campaign.handouts.push({ id: randId('hd'), title: safe(title||'Handout',120), content: safe(content||'', 4000) });
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  socket.on('campaign_quest_add', ({title})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    L.campaign.quests.push({ id: randId('q'), title: safe(title||'Quest', 200), done: false });
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  socket.on('campaign_quest_toggle', ({id})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    if (!isGM(L)) { socket.emit('error_message','GM only.'); return; }
-    const q = L.campaign.quests.find(q=>q.id===id);
-    if (!q) return;
-    q.done = !q.done;
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  socket.on('campaign_note_add', ({text})=>{
-    if (!lobby) return;
-    const L = ensureLobby(lobby);
-    const t = safe(text, 1000);
-    if (!t) return;
-    L.campaign.notes.push({ by: username, text: t, ts: nowISO() });
-    io.to(lobby).emit('campaign_state', L.campaign);
-  });
-
-  // ---------- Commands ----------
+  // ===== Commands =====
   async function handleCommand(L, line){
     const [cmd, ...rest] = line.slice(1).split(' ');
     const argStr = rest.join(' ').trim();
@@ -581,19 +496,25 @@ io.on('connection', (socket)=>{
     switch ((cmd||'').toLowerCase()){
       case 'help':
         socket.emit('system',
-          'Commands: /help, /me <action>, /w @name <msg>, /roll <expr>, /macro add name=expr | del name | list, ' +
+          'Commands: /help, /me <action>, /w @name <msg>, /roll <expr>, ' +
+          '/macro add name=expr | del name | list, ' +
           '/setpass <pass> (GM on first set), /kick <name> (GM), /ban <name> (GM), /unban <name> (GM), ' +
           '/startencounter (GM), /setinit <name> <n> (GM), /next (GM), /endencounter (GM), ' +
-          'Campaign: /camp title <t> (GM), /camp summary <text> (GM), /scene add <title>|<content> (GM), /scene set <sceneId> (GM), ' +
-          '/start (GM to start), /consent force (GM)'
+          'Campaign: /camp title <t> (GM), /camp summary <text> (GM), ' +
+          '/scene add <title>|<content> (GM), /scene set <sceneId> (GM), ' +
+          '/start (GM start campaign), /consent force (GM)'
         );
         break;
 
       case 'start': {
         if (!gm) { socket.emit('error_message','GM only.'); break; }
+        if (L.settings.campaignStarted) { socket.emit('error_message','Already started.'); break; }
         L.settings.campaignStarted = true;
         send('GM started the campaign!');
-        io.to(lobby).emit('campaign_started', { at: nowISO() });
+        io.to(lobby).emit('campaign_started', { sceneId: L.campaign.currentSceneId });
+        for (const [sid, u] of L.users.entries()){
+          if (!L.characters.has(u.name)) io.to(sid).emit('character_required', { reason: 'campaign_started' });
+        }
         emitState();
         break;
       }
@@ -618,10 +539,12 @@ io.on('connection', (socket)=>{
 
       case 'roll': {
         if (isLockedForPlayers(L) && !gm) { socket.emit('error_message','Campaign not started by GM yet.'); break; }
-        const res = rollAdvanced(argStr || 'd20');
-        const payload = { user: username, ...res, ts: nowISO(), lobby };
-        io.to(lobby).emit('roll', payload);
-        L.rolls.push(payload);
+        try {
+          const res = rollAdvanced(argStr || 'd20');
+          const payload = { user: username, ...res, ts: nowISO(), lobby };
+          io.to(lobby).emit('roll', payload);
+          L.rolls.push(payload);
+        } catch(e){ socket.emit('error_message', e.message || 'Bad dice'); }
         break;
       }
 
@@ -648,7 +571,7 @@ io.on('connection', (socket)=>{
         if (!argStr) { socket.emit('error_message','Usage: /setpass <password>'); break; }
         L.passwordHash = hashPass(argStr);
         if (!L.gm) L.gm = username;
-        await upsertLobbyMeta(lobby, { password:true, gm:L.gm, updatedAt: nowISO() });
+        await upsertLobbyMeta?.(lobby, { password:true, gm:L.gm, updatedAt: nowISO() });
         send('Lobby password set/updated.');
         emitState();
         break;
@@ -668,11 +591,15 @@ io.on('connection', (socket)=>{
         break;
       }
 
-      case 'ban':  { if (!gm) { socket.emit('error_message','GM only.'); break; } L.bans.add(safe(argStr,24).toLowerCase()); send(`${argStr} is banned.`); emitState(); break; }
-      case 'unban':{ if (!gm) { socket.emit('error_message','GM only.'); break; } L.bans.delete(safe(argStr,24).toLowerCase()); send(`${argStr} is unbanned.`); emitState(); break; }
+      case 'ban':   { if (!gm) { socket.emit('error_message','GM only.'); break; } L.bans.add(safe(argStr,24).toLowerCase()); send(`${argStr} is banned.`); emitState(); break; }
+      case 'unban': { if (!gm) { socket.emit('error_message','GM only.'); break; } L.bans.delete(safe(argStr,24).toLowerCase()); send(`${argStr} is unbanned.`); emitState(); break; }
 
       // Encounter
-      case 'startencounter': { if (!gm) { socket.emit('error_message','GM only.'); break; } L.encounter={active:true,order:[],turnIndex:0}; send('Encounter started. Use /setinit <name> <n>.'); emitState(); break; }
+      case 'startencounter': {
+        if (!gm) { socket.emit('error_message','GM only.'); break; }
+        L.encounter={active:true,order:[],turnIndex:0};
+        send('Encounter started. Use /setinit <name> <n>.'); emitState(); break;
+      }
       case 'setinit': {
         if (!gm) { socket.emit('error_message','GM only.'); break; }
         const m = argStr.match(/^(\S+)\s+(-?\d+)$/);
@@ -683,19 +610,23 @@ io.on('connection', (socket)=>{
         L.encounter.order.sort((a,b)=>b.init-a.init);
         send(`Initiative set: ${name} → ${init}`); emitState(); break;
       }
-      case 'next': { if (!gm) { socket.emit('error_message','GM only.'); break; }
+      case 'next': {
+        if (!gm) { socket.emit('error_message','GM only.'); break; }
         if (!L.encounter.active || L.encounter.order.length===0) { socket.emit('error_message','No active encounter.'); break; }
         L.encounter.turnIndex = (L.encounter.turnIndex+1) % L.encounter.order.length;
         send(`Turn: ${L.encounter.order[L.encounter.turnIndex].name}`); emitState(); break;
       }
-      case 'endencounter': { if (!gm) { socket.emit('error_message','GM only.'); break; } L.encounter={active:false,order:[],turnIndex:0}; send('Encounter ended.'); emitState(); break; }
+      case 'endencounter': {
+        if (!gm) { socket.emit('error_message','GM only.'); break; }
+        L.encounter={active:false,order:[],turnIndex:0}; send('Encounter ended.'); emitState(); break;
+      }
 
       // Campaign helpers
       case 'camp': {
         const m = argStr.match(/^(title|summary)\s+([\s\S]+)$/);
         if (!m) { socket.emit('error_message','Usage: /camp title <text> | /camp summary <text>'); break; }
         if (!gm) { socket.emit('error_message','GM only.'); break; }
-        if (m[1]==='title') L.campaign.title = safe(m[2], 120);
+        if (m[1]==='title')   L.campaign.title   = safe(m[2], 120);
         if (m[1]==='summary') L.campaign.summary = safe(m[2], 2000);
         send(`Campaign ${m[1]} updated.`); emitState(); break;
       }
@@ -719,15 +650,17 @@ io.on('connection', (socket)=>{
 
       case 'consent': {
         if (!gm) { socket.emit('error_message','GM only.'); break; }
-        if (argStr.trim() === 'force') { io.to(socket.id).emit('consent_force'); } // client will emit socket 'consent_force'
+        if (argStr.trim() === 'force') socket.emit('consent_force');
         else socket.emit('error_message','Use: /consent force');
         break;
       }
 
-      default: socket.emit('error_message','Unknown command. Try /help');
+      default:
+        socket.emit('error_message','Unknown command. Try /help');
     }
   }
 
+  // ===== On disconnect =====
   socket.on('disconnect', ()=>{
     if (!lobby) return;
     const L = ensureLobby(lobby);
@@ -737,13 +670,18 @@ io.on('connection', (socket)=>{
   });
 });
 
-// ---------- Mongo init (optional) ----------
+// ===== Optional Mongo + Boot =====
 (async ()=>{
   if (useMongo) {
-    mongoClient = new MongoClient(process.env.MONGODB_URI, { ignoreUndefined: true });
-    await mongoClient.connect();
-    db = mongoClient.db(process.env.MONGODB_DB || 'dnd');
-    console.log('Mongo connected');
+    try {
+      mongoClient = new MongoClient(process.env.MONGODB_URI, { ignoreUndefined: true });
+      await mongoClient.connect();
+      db = mongoClient.db(process.env.MONGODB_DB || 'dnd');
+      console.log('Mongo connected');
+    } catch (e) {
+      console.error('Mongo connection failed (continuing without DB):', e.message);
+    }
   }
   server.listen(PORT, ()=> console.log(`Server on ${PORT}`));
 })();
+
