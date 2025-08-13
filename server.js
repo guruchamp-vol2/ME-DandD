@@ -77,14 +77,52 @@ function rollAdvanced(exprRaw) {
 const memory = { lobbies: new Map() };
 const defaultMap = () => ({ w: 20, h: 20, tiles: Array.from({length:20}, () => Array(20).fill(0)), tokens: {} });
 const defaultCampaign = () => ({
-  title: 'Untitled Campaign',
-  summary: 'A new adventure begins...',
-  scenes: [], // {id,title,content,choices:[{id,text,to}]}
-  currentSceneId: null,
-  handouts: [], // {id,title,content}
-  quests: [], // {id,title,done}
-  notes: [] // {by,text,ts}
+  title: 'Embers of Argeth',
+  summary: 'A starter mini-campaign that ships with this app. Play through to test the Campaign tab & choices.',
+  scenes: [
+    { id: 's_intro', title: 'Arrival in Graywick', content: 'You reach the foggy mining town of Graywick. A notice board mentions escort work and missing caravans.', choices: [
+      { id: 'c_intro_tavern', text: 'Head to the Burnt Anvil tavern', to: 's_tavern' },
+      { id: 'c_intro_board',  text: 'Study the notice board',        to: 's_board'  }
+    ]},
+    { id: 's_tavern', title: 'The Burnt Anvil', content: 'A grizzled foreman offers 10 gp each to guard a wagon to the riverside mill at dawn.', choices: [
+      { id: 'c_tavern_accept', text: 'Accept the job (escort quest)', to: 's_road' },
+      { id: 'c_tavern_market', text: 'Wander the night market',       to: 's_market' }
+    ]},
+    { id: 's_board', title: 'Notice Board', content: 'Multiple caravans are late. Witnesses whisper about red-eyed goblins near the Old Road.', choices: [
+      { id: 'c_board_investigate', text: 'Investigate the Old Road', to: 's_road' },
+      { id: 'c_board_ignore',      text: 'Ignore and find rumors',   to: 's_market' }
+    ]},
+    { id: 's_market', title: 'Night Market', content: 'Lanterns sway, traders haggle. A sailor swears the ruined lighthouse glows at midnight.', choices: [
+      { id: 'c_market_lighthouse', text: 'Scout the lighthouse', to: 's_lighthouse' },
+      { id: 'c_market_sleep',      text: 'Rest and take the escort job', to: 's_road' }
+    ]},
+    { id: 's_road', title: 'Ambush on the Old Road', content: 'Rain slicks the stones. Goblins spring from the brush! After the skirmish, tracks lead into the woods.', choices: [
+      { id: 'c_road_track',  text: 'Follow the tracks', to: 's_cave' },
+      { id: 'c_road_help',   text: 'Help the wounded, return to town', to: 's_graywick' }
+    ]},
+    { id: 's_cave', title: 'Gloomroot Cave', content: 'Mushrooms glow faintly. Captives plead from wicker cages. A crude idol hums with heat.', choices: [
+      { id: 'c_cave_rescue', text: 'Rescue the captives', to: 's_reward' },
+      { id: 'c_cave_idol',   text: 'Smash the idol',      to: 's_reward' }
+    ]},
+    { id: 's_lighthouse', title: 'Ruined Lighthouse', content: 'Wind howls through broken windows. Below, a sealed hatch marks an old vault bearing the sigil of Argeth.', choices: [
+      { id: 'c_lh_descend', text: 'Descend into the vault', to: 's_reward' }
+    ]},
+    { id: 's_graywick', title: 'Back to Graywick', content: 'The town thanks you. The foreman suggests returning to the road to finish the job.', choices: [
+      { id: 'c_graywick_road', text: 'Return to the Old Road', to: 's_road' }
+    ]},
+    { id: 's_reward', title: 'Aftermath', content: 'With the threat blunted, the town offers coin and rumors of a deeper power called the Ember Crown.', choices: []}
+  ],
+  currentSceneId: 's_intro',
+  handouts: [
+    { id: 'h_notice', title: 'Notice Board', content: 'Escort needed: guard a wagon to the mill at dawn. Pay: 10 gp each.' }
+  ],
+  quests: [
+    { id: 'q_escort',  title: 'Escort the supply wagon to the mill', done: false },
+    { id: 'q_goblins', title: 'Discover why caravans are missing',   done: false }
+  ],
+  notes: []
 });
+
 
 function ensureLobby(name) {
   if (!memory.lobbies.has(name)) {
