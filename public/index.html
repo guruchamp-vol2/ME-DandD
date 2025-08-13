@@ -6,8 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- Styles -->
     <link rel="stylesheet" href="/styles.css" />
-    <!-- Socket.io (same origin to satisfy CSP) -->
-    <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
     <!-- App chrome -->
@@ -173,7 +171,7 @@
               <button class="btn ghost" id="addToken">Add My Token</button>
               <input id="tokenName" class="w-20" placeholder="Token name">
               <input id="tokenColor" type="color" value="#222222" class="color">
-              <button id="removeToken">Remove Selected</button>
+              <button id="removeToken" class="btn ghost">Remove Selected</button>
               <button class="btn ghost" id="pingBtn">Ping</button>
               <canvas id="miniCanvas" width="180" height="180" class="mini"></canvas>
             </div>
@@ -294,7 +292,8 @@
       <div class="muted">Create a lobby with a password to become GM. Build your story with scenes, choices, handouts, and quests.</div>
     </footer>
 
-    <!-- App logic -->
+    <!-- Scripts: load Socket.IO first, then your app (only once each). -->
+    <script src="/socket.io/socket.io.js"></script>
     <script src="/client.js"></script>
   </body>
 </html>

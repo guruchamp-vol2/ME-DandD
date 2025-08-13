@@ -1,45 +1,66 @@
-/* Full client.js for D&D Lobbies: chat, dice, character customization, mini-map, encounter tracker, and campaign add-on (CSP safe) */
-const socket = io(); // requires /socket.io/socket.io.js loaded from same origin
+// ===== client.js (Part 1/3) =====
+// Requires <script src="/socket.io/socket.io.js"></script> in index.html
+const socket = io();
 
-// ---------------- DOM helpers ----------------
+// ------- DOM helpers -------
 const $ = (id) => document.getElementById(id);
 const log = (html, cls='') => {
   const el = document.createElement('div');
   el.className = cls; el.innerHTML = html;
-  $('log').appendChild(el); $('log').scrollTop = $('log').scrollHeight;
+  const host = $('log'); if (!host) return;
+  host.appendChild(el); host.scrollTop = host.scrollHeight;
 };
 
-// Tabs helper (match .panel-body sections)
+// Tabs
 const switchTab = (id) => {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
   document.querySelectorAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
 };
-// Wire tabs
-document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+document.querySelectorAll('.tab-btn').forEach(btn =>
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab))
+);
 
 function escapeHtml(s){ return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 function linkify(s){ return s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`); }
 
-// ---------------- Lobby actions ----------------
-$('joinBtn').onclick = () => {
+// ------- Lobby actions -------
+$('joinBtn')?.addEventListener('click', () => {
   const name = $('name').value.trim() || 'Anon';
   const lobby = $('lobby').value.trim() || 'tavern';
   const password = $('password').value.trim();
   socket.emit('identify', { name });
   socket.emit('join_lobby', { lobby, password });
-};
-$('listBtn').onclick = async () => {
-  const res = await fetch('/lobbies'); const list = await res.json();
-  const ul = $('lobbies'); ul.innerHTML = '';
-  list.forEach(l => { const li = document.createElement('li'); li.textContent = l; li.style.cursor='pointer'; li.onclick=()=>{ $('lobby').value=l; }; ul.appendChild(li); });
-};
+});
 
-// ---------------- Chat / Dice ----------------
-$('sendBtn').onclick = () => { const text = $('msg').value.trim(); if (!text) return; socket.emit('chat', { text }); $('msg').value=''; };
-$('msg').addEventListener('keydown', (e)=> { if (e.key==='Enter') $('sendBtn').click(); });
-$('rollBtn').onclick = () => { const expression = $('expr').value.trim() || 'd20'; socket.emit('roll', { expression }); };
+$('listBtn')?.addEventListener('click', async () => {
+  try {
+    const res = await fetch('/lobbies', { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const list = await res.json();
+    const ul = $('lobbies'); if (!ul) return;
+    ul.innerHTML = '';
+    (list || []).forEach(l => {
+      const li = document.createElement('li');
+      li.textContent = l; li.style.cursor='pointer';
+      li.onclick = () => { $('lobby').value = l; };
+      ul.appendChild(li);
+    });
+  } catch (e) {
+    log(`Error loading lobbies. Is your server routing /lobbies? (${escapeHtml(String(e))})`, 'sys');
+  }
+});
 
-// Render chat & roll messages
+// ------- Chat / Dice -------
+$('sendBtn')?.addEventListener('click', () => {
+  const text = $('msg').value.trim(); if (!text) return;
+  socket.emit('chat', { text }); $('msg').value='';
+});
+$('msg')?.addEventListener('keydown', (e)=> { if (e.key==='Enter') $('sendBtn').click(); });
+$('rollBtn')?.addEventListener('click', () => {
+  const expression = $('expr').value.trim() || 'd20';
+  socket.emit('roll', { expression });
+});
+
 function renderChat({ user, text, ts }) {
   const when = ts ? new Date(ts).toLocaleTimeString() : '';
   log(`<span class="chat"><strong>${escapeHtml(user)}:</strong> ${linkify(escapeHtml(text))} <small>${when}</small></span>`);
@@ -50,7 +71,7 @@ function renderRoll({ user, expression, rolls, used, modifier, total, ts }) {
   log(`<div class="roll"><strong>${escapeHtml(user)}</strong> rolled <code>${escapeHtml(expression)}</code> → <strong>${total}</strong> <small>${when}</small><br/>Rolls: [${(rolls||[]).join(', ')}] • Used: [${(used||[]).join(', ')}] ${modStr}</div>`, 'roll');
 }
 
-// ---------------- Character Customization ----------------
+// ------- Character Customization -------
 const PRESETS = {
   Warrior: { STR:15, DEX:10, CON:14, INT:8, WIS:10, CHA:10, traits:'Martial prowess, Second Wind' },
   Rogue:   { STR:8,  DEX:15, CON:12, INT:10, WIS:10, CHA:12, traits:'Sneak Attack, Cunning Action' },
@@ -63,65 +84,69 @@ const RACE_MODS = {
   Dwarf:   { CON:2, WIS:1, speed:25, note:'Dwarven Resilience' },
   Halfling:{ DEX:2, CHA:1, speed:25, note:'Lucky, Brave' },
 };
-
 const AB_IDS = ['STR','DEX','CON','INT','WIS','CHA'];
+
 const cost = (score) => {
   if (score < 8) return 0;
   if (score <= 13) return score - 8;
-  if (score === 14) return 7 + 2;
-  if (score === 15) return 9 + 2;
+  if (score === 14) return 9; // 7 + 2
+  if (score === 15) return 11; // 9 + 2
   return 999;
 };
 const totalCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt($('ab_'+id).value||8,10)), 0);
 const updatePoints = () => {
   const spent = totalCost();
   const left = 27 - spent;
-  $('pointsLeft').textContent = `Points left: ${left}`;
-  $('pointsLeft').style.background = left < 0 ? '#ffe6e6' : '';
+  const chip = $('pointsLeft');
+  if (chip) {
+    chip.textContent = `Points left: ${left}`;
+    chip.style.background = left < 0 ? '#ffe6e6' : '';
+  }
 };
-AB_IDS.forEach(id => $('ab_'+id).addEventListener('input', ()=> updatePoints()));
-$('c_archetype').addEventListener('change', ()=>{
+AB_IDS.forEach(id => $('ab_'+id)?.addEventListener('input', updatePoints));
+
+$('c_archetype')?.addEventListener('change', ()=>{
   const a = $('c_archetype').value;
   if (!a || !PRESETS[a]) return;
-  AB_IDS.forEach(id => $('ab_'+id).value = PRESETS[a][id]);
-  $('c_traits').value = (PRESETS[a].traits || '');
+  AB_IDS.forEach(id => { const el = $('ab_'+id); if (el) el.value = PRESETS[a][id]; });
+  const traits = $('c_traits'); if (traits) traits.value = (PRESETS[a].traits || '');
   updatePoints();
 });
-$('c_race').addEventListener('change', ()=>{
+
+$('c_race')?.addEventListener('change', ()=>{
   const r = $('c_race').value;
   const mod = RACE_MODS[r] || {};
-  $('c_speed').value = mod.speed || 30;
+  const speedEl = $('c_speed'); if (speedEl) speedEl.value = mod.speed || 30;
   const tips = mod.note ? `; ${mod.note}` : '';
-  if (mod.note && !$('c_traits').value.includes(mod.note)) $('c_traits').value = ( $('c_traits').value || '' ) + tips;
+  const traits = $('c_traits'); if (mod.note && traits && !traits.value.includes(mod.note)) traits.value = (traits.value || '') + tips;
 });
 
-// Save/Delete
-$('saveChar').onclick = () => {
+$('saveChar')?.addEventListener('click', () => {
   const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt($('ab_'+id).value||8,10)]));
   const sheet = {
-    name: $('c_name').value.trim(),
-    class: $('c_class').value.trim(),
-    archetype: $('c_archetype').value || '',
-    race: $('c_race').value || 'Human',
-    level: Number($('c_level').value||1),
-    ac: Number($('c_ac').value||10),
-    hp: Number($('c_hp').value||10),
-    maxHp: Number($('c_maxHp').value||10),
+    name: $('c_name')?.value.trim(),
+    class: $('c_class')?.value.trim(),
+    archetype: $('c_archetype')?.value || '',
+    race: $('c_race')?.value || 'Human',
+    level: Number($('c_level')?.value || 1),
+    ac: Number($('c_ac')?.value || 10),
+    hp: Number($('c_hp')?.value || 10),
+    maxHp: Number($('c_maxHp')?.value || 10),
     abilities,
-    speed: Number($('c_speed').value||30),
-    profs: $('c_profs').value,
-    traits: $('c_traits').value,
-    notes: $('c_notes').value
+    speed: Number($('c_speed')?.value || 30),
+    profs: $('c_profs')?.value || '',
+    traits: $('c_traits')?.value || '',
+    notes: $('c_notes')?.value || ''
   };
   socket.emit('character_upsert', sheet);
-};
-$('deleteChar').onclick = () => {
-  socket.emit('character_delete', { name: $('c_name').value.trim() });
-};
+});
+$('deleteChar')?.addEventListener('click', () => {
+  socket.emit('character_delete', { name: $('c_name')?.value.trim() });
+});
 
-// Render character table
 function renderChars(charsObj){
-  const tbody = $('charsTable'); tbody.innerHTML='';
+  const tbody = $('charsTable'); if (!tbody) return;
+  tbody.innerHTML='';
   Object.values(charsObj||{}).forEach(c=>{
     const ab = c.abilities || {};
     const tr = document.createElement('tr');
@@ -154,31 +179,37 @@ function renderChars(charsObj){
     tbody.appendChild(tr);
   });
 }
+// ===== client.js (Part 2/3) =====
 
-// ---------------- Map ----------------
+// ------- Map -------
 let MAP = { w:20, h:20, tiles:[], tokens:{} };
 const mapCanvas = $('mapCanvas');
 const miniCanvas = $('miniCanvas');
-const ctx = mapCanvas.getContext('2d');
-const mctx = miniCanvas.getContext('2d');
+const ctx = mapCanvas?.getContext('2d');
+const mctx = miniCanvas?.getContext('2d');
 
 let cellW = 24, cellH = 24;
 function resizeCells(){
+  if (!mapCanvas || !MAP.w || !MAP.h) return;
   cellW = Math.floor(mapCanvas.width / MAP.w);
   cellH = Math.floor(mapCanvas.height / MAP.h);
 }
+
 function drawMap(){
+  if (!ctx || !mctx || !mapCanvas || !miniCanvas) return;
+
   ctx.clearRect(0,0,mapCanvas.width,mapCanvas.height);
 
-  // If tiles array isn't ready yet, don't crash—just clear canvases and return.
+  // Guard: if tiles not ready, clear mini and bail
   if (!Array.isArray(MAP.tiles) || MAP.tiles.length === 0) {
     mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
     return;
   }
 
+  // Grid + walls
   for (let y=0;y<MAP.h;y++){
     for (let x=0;x<MAP.w;x++){
-      const isWall = ((MAP.tiles[y] || [])[x] === 1);     // ✅ guard
+      const isWall = ((MAP.tiles[y] || [])[x] === 1);
       ctx.fillStyle = isWall ? '#2b303b' : '#f9fafb';
       ctx.fillRect(x*cellW, y*cellH, cellW, cellH);
       ctx.strokeStyle = '#e5e7eb';
@@ -203,7 +234,7 @@ function drawMap(){
   const sx = miniCanvas.width / MAP.w, sy = miniCanvas.height / MAP.h;
   for (let y=0;y<MAP.h;y++){
     for (let x=0;x<MAP.w;x++){
-      const isWall = ((MAP.tiles[y] || [])[x] === 1);     // ✅ guard here too
+      const isWall = ((MAP.tiles[y] || [])[x] === 1);
       mctx.fillStyle = isWall ? '#2b303b' : '#f9fafb';
       mctx.fillRect(x*sx, y*sy, sx, sy);
     }
@@ -213,30 +244,6 @@ function drawMap(){
     mctx.fillRect(t.x*sx, t.y*sy, sx, sy);
   });
 }
-  Object.values(MAP.tokens||{}).forEach(t=>{
-    const cx = t.x*cellW + cellW/2, cy = t.y*cellH + cellH/2;
-    ctx.beginPath(); ctx.arc(cx,cy, Math.min(cellW,cellH)*0.35, 0, Math.PI*2);
-    ctx.fillStyle = t.color || '#222'; ctx.fill();
-    ctx.strokeStyle = '#111'; ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.font = `${Math.floor(Math.min(cellW,cellH)*0.4)}px system-ui`;
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText((t.name||'?')[0]?.toUpperCase() || '?', cx, cy);
-  });
-
-  mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
-  const sx = miniCanvas.width / MAP.w, sy = miniCanvas.height / MAP.h;
-  for (let y=0;y<MAP.h;y++){
-    for (let x=0;x<MAP.w;x++){
-      mctx.fillStyle = (MAP.tiles[y][x]===1) ? '#2b303b' : '#f9fafb';
-      mctx.fillRect(x*sx, y*sy, sx, sy);
-    }
-  }
-  Object.values(MAP.tokens||{}).forEach(t=>{
-    mctx.fillStyle = t.color || '#222';
-    mctx.fillRect(t.x*sx, t.y*sy, sx, sy);
-  });
-
 
 let selectedTokenId = null;
 function pickTokenAt(mx,my){
@@ -252,10 +259,10 @@ function tileFromMouse(e){
 }
 
 let dragging = false;
-mapCanvas.addEventListener('mousedown', (e)=>{
+mapCanvas?.addEventListener('mousedown', (e)=>{
   const {x,y} = tileFromMouse(e);
-  if ($('drawWalls').checked){
-    const val = $('eraseWalls').checked ? 0 : 1;
+  if ($('drawWalls')?.checked){
+    const val = $('eraseWalls')?.checked ? 0 : 1;
     socket.emit('map_set', { x, y, val });
     dragging = true;
   } else {
@@ -264,11 +271,11 @@ mapCanvas.addEventListener('mousedown', (e)=>{
     dragging = !!id;
   }
 });
-mapCanvas.addEventListener('mousemove', (e)=>{
+mapCanvas?.addEventListener('mousemove', (e)=>{
   if (!dragging) return;
   const {x,y} = tileFromMouse(e);
-  if ($('drawWalls').checked){
-    const val = $('eraseWalls').checked ? 0 : 1;
+  if ($('drawWalls')?.checked){
+    const val = $('eraseWalls')?.checked ? 0 : 1;
     socket.emit('map_set', { x, y, val });
   } else if (selectedTokenId){
     socket.emit('token_move', { id: selectedTokenId, x, y });
@@ -276,17 +283,24 @@ mapCanvas.addEventListener('mousemove', (e)=>{
 });
 window.addEventListener('mouseup', ()=> { dragging = false; });
 
-$('gmSetMap').onclick = () => socket.emit('map_init', { w: Number($('mapW').value||20), h: Number($('mapH').value||20) });
-$('gmClear').onclick = () => socket.emit('map_clear');
-$('addToken').onclick = () => socket.emit('token_add', { name: $('tokenName').value.trim() || $('name').value.trim() || 'Anon', color: $('tokenColor').value });
-$('removeToken').onclick = () => { if (selectedTokenId) socket.emit('token_remove', { id: selectedTokenId }); };
-$('pingBtn').onclick = ()=> {
+$('gmSetMap')?.addEventListener('click', () => socket.emit('map_init', {
+  w: Number($('mapW')?.value || 20),
+  h: Number($('mapH')?.value || 20)
+}));
+$('gmClear')?.addEventListener('click', () => socket.emit('map_clear'));
+$('addToken')?.addEventListener('click', () => socket.emit('token_add', {
+  name: $('tokenName')?.value.trim() || $('name')?.value.trim() || 'Anon',
+  color: $('tokenColor')?.value || '#222222'
+}));
+$('removeToken')?.addEventListener('click', () => { if (selectedTokenId) socket.emit('token_remove', { id: selectedTokenId }); });
+$('pingBtn')?.addEventListener('click', () => {
   const x = Math.floor(MAP.w/2), y = Math.floor(MAP.h/2);
   socket.emit('ping', { x, y });
-};
+});
 
 let pings = [];
 function renderPings(){
+  if (!ctx) return;
   const now = Date.now();
   pings = pings.filter(p => now - p.ts < 1200);
   pings.forEach(p=>{
@@ -294,24 +308,25 @@ function renderPings(){
     const r = Math.min(cellW,cellH) * (0.2 + t*0.8);
     const cx = p.x*cellW + cellW/2, cy = p.y*cellH + cellH/2;
     ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
-    ctx.strokeStyle = 'rgba(220, 38, 38, ' + (1-t) + ')';
+    ctx.strokeStyle = `rgba(220, 38, 38, ${1-t})`;
     ctx.lineWidth = 3; ctx.stroke();
   });
   if (pings.length) requestAnimationFrame(()=>{ drawMap(); renderPings(); });
 }
 
-// ---------------- Encounter tracker ----------------
-$('encStart').onclick = () => socket.emit('chat', { text: '/startencounter' });
-$('encNext').onclick  = () => socket.emit('chat', { text: '/next' });
-$('encEnd').onclick   = () => socket.emit('chat', { text: '/endencounter' });
-$('setInit').onclick  = () => {
-  const name = $('initName').value.trim();
-  const val  = Number($('initVal').value||0);
+// ------- Encounter -------
+$('encStart')?.addEventListener('click', () => socket.emit('chat', { text: '/startencounter' }));
+$('encNext')?.addEventListener('click',  () => socket.emit('chat', { text: '/next' }));
+$('encEnd')?.addEventListener('click',   () => socket.emit('chat', { text: '/endencounter' }));
+$('setInit')?.addEventListener('click',  () => {
+  const name = $('initName')?.value.trim();
+  const val  = Number($('initVal')?.value || 0);
   if (!name) return;
   socket.emit('chat', { text: `/setinit ${name} ${val}` });
-};
+});
 function renderEncounter(enc){
-  const tbody = $('initTable'); tbody.innerHTML='';
+  const tbody = $('initTable'); if (!tbody) return;
+  tbody.innerHTML='';
   (enc.order||[]).forEach((o,idx)=>{
     const tr = document.createElement('tr');
     const isTurn = enc.active && idx === (enc.turnIndex||0);
@@ -320,16 +335,13 @@ function renderEncounter(enc){
     tbody.appendChild(tr);
   });
 }
+// ===== client.js (Part 3/3) =====
 
-// ---------------- Campaign / Story Mode ----------------
+// ------- Campaign / Story Mode -------
 function _escape(s){ return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;')
   .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
+function ensureCampaignUI() { return !!$('campTab'); }
 
-function ensureCampaignUI() {
-  return !!$('campTab');
-}
-
-// Render campaign UI
 function renderCampaignState(c){
   if (!ensureCampaignUI()) return;
 
@@ -345,7 +357,7 @@ function renderCampaignState(c){
   const choicesEl = $('campChoices'); choicesEl.innerHTML = '';
   (current?.choices || []).forEach(ch => {
     const btn = document.createElement('button');
-    btn.className = 'tool';
+    btn.className = 'btn ghost';
     btn.textContent = ch.text;
     btn.onclick = () => socket.emit('campaign_choice_pick', { choiceId: ch.id });
     choicesEl.appendChild(btn);
@@ -354,11 +366,11 @@ function renderCampaignState(c){
   $('handouts').innerHTML = (c.handouts || [])
     .map(h => `<li><strong>${_escape(h.title)}</strong>: ${_escape(h.content)}</li>`).join('');
 
-  $('quests').innerHTML   = (c.quests || [])
+  $('quests').innerHTML = (c.quests || [])
     .map(q => `<li>${q.done ? '✅' : '⬜️'} ${_escape(q.title)} <small><code>${_escape(q.id)}</code></small></li>`)
     .join('');
 
-  $('notes').innerHTML    = (c.notes || [])
+  $('notes').innerHTML = (c.notes || [])
     .map(n => `<div class="small"><strong>${_escape(n.by)}</strong>: ${_escape(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`)
     .join('');
 
@@ -369,7 +381,6 @@ function renderCampaignState(c){
   const tools = $('gmTools'); if (tools) tools.style.display = isGM ? 'block' : 'none';
 }
 
-// Wire GM Tool buttons
 function wireCampaignButtons(){
   if (!ensureCampaignUI()) return;
   const byId = (i) => document.getElementById(i);
@@ -422,18 +433,18 @@ function wireCampaignButtons(){
   });
 }
 
-// ---------------- Socket events ----------------
+// ------- Socket events -------
 socket.on('identified', ({ username })=> log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys'));
 
 socket.on('joined', ({ lobby, history, gm })=>{
-  $('log').innerHTML = '';
+  const logHost = $('log'); if (logHost) logHost.innerHTML = '';
   log(`Joined lobby <strong>${escapeHtml(lobby)}</strong>.`, 'sys');
   (history.messages||[]).forEach(m=>renderChat(m));
   (history.rolls||[]).forEach(r=>renderRoll(r));
-  $('gmBadge').textContent = `GM: ${gm || '—'}`;
+  const gmB = $('gmBadge'); if (gmB) gmB.textContent = `GM: ${gm || '—'}`;
   socket.emit('map_request');
-  socket.emit('campaign_get');     // ask server for campaign state
-  wireCampaignButtons();           // ensure GM buttons wired
+  socket.emit('campaign_get');
+  wireCampaignButtons();
 });
 
 socket.on('system', (t)=> log(escapeHtml(t), 'sys'));
@@ -443,8 +454,9 @@ socket.on('error_message', (msg)=> log(`Error: ${escapeHtml(msg)}`, 'sys'));
 
 socket.on('characters', (obj)=> renderChars(obj));
 socket.on('state', (state)=>{
-  $('gmBadge').textContent = `GM: ${state.gm || '—'}`;
-  $('users').innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
+  const gmB = $('gmBadge'); if (gmB) gmB.textContent = `GM: ${state.gm || '—'}`;
+  const users = $('users');
+  if (users) users.innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
   if (state.campaign) renderCampaignState(state.campaign);
@@ -457,15 +469,9 @@ socket.on('map_ping', ({x,y})=>{
   pings.push({ x,y, ts: Date.now() });
   drawMap(); renderPings();
 });
-
-// Campaign events
 socket.on('campaign_state', (c) => renderCampaignState(c));
 
-// Initial draw & resize
-resizeCells(); drawMap();
-window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
-
-// ------- Theme toggle (moved from inline to satisfy CSP) -------
+// ------- Theme toggle (CSP safe) -------
 (() => {
   const root = document.documentElement;
   const saved = localStorage.getItem('theme');
@@ -474,16 +480,18 @@ window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
   const btn = document.getElementById('themeToggle');
   if (btn) {
     btn.addEventListener('click', () => {
-      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
       localStorage.setItem('theme', root.dataset.theme);
     });
   }
 })();
 
-// ------- Extra Tab wiring safety (if DOM loaded later) -------
+// Init
+resizeCells(); drawMap();
+window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
 document.addEventListener('DOMContentLoaded', () => {
   wireCampaignButtons();
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-  });
+  document.querySelectorAll('.tab-btn').forEach(btn =>
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab))
+  );
 });
