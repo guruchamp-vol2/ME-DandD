@@ -1,15 +1,47 @@
-/* D&D Lobbies — client.js (chunk 1/3)
-   Works with start-lock, character popup, and consent flow.
+/* D&D Lobbies — client.js (fixed)
+   Start-lock + consent flow; robust GM detection; correct "campaign started" logic.
    Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
 */
 
 const socket = io();
-let CAMPAIGN = { started:false, currentSceneId:null, pendingChoice:null, gm:'' };
+
+/* ---------------- Global state ---------------- */
+let CURRENT_USER = null; // set on 'identified'
+let CAMPAIGN = {
+  started: false,
+  currentSceneId: null,
+  pendingChoice: null,
+  gm: ''
+};
+
+/* ---------------- DOM helpers ---------------- */
+const $ = (id) => document.getElementById(id);
+const bySel = (sel, root=document) => root.querySelector(sel);
+const bySelAll = (sel, root=document) => [...root.querySelectorAll(sel)];
+
+const log = (html, cls='') => {
+  const el = document.createElement('div');
+  el.className = cls; el.innerHTML = html;
+  const logEl = $('log'); if (!logEl) return;
+  logEl.appendChild(el); logEl.scrollTop = logEl.scrollHeight;
+};
+
+const switchTab = (id) => {
+  bySelAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
+  bySelAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
+};
+bySelAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+const escapeHtml = (s)=> String(s)
+  .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+  .replaceAll('"','&quot;').replaceAll("'",'&#039;');
+const linkify = (s)=> s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+
+/* ---------------- Campaign Picker (GM only UI) ---------------- */
 async function injectCampaignPicker() {
   const tab = $('campTab'); if (!tab) return;
 
-  // Only one picker
-  if (bySel('[data-campaign-picker]', tab)) return;
+  if (bySel('[data-campaign-picker]', tab)) return; // Only one
 
   const wrap = document.createElement('div');
   wrap.dataset.campaignPicker = '1';
@@ -42,38 +74,14 @@ async function injectCampaignPicker() {
     renderPrev();
 
     $('campaignLoadBtn').addEventListener('click', ()=>{
-      // Only GM should see this; server also enforces
-      socket.emit('campaign_load', { key: sel.value });
+      socket.emit('campaign_load', { key: $('campaignSelect').value });
     });
   } catch (e) {
     console.error(e);
   }
 }
 
-/* ---------------- DOM helpers ---------------- */
-const $ = (id) => document.getElementById(id);
-const bySel = (sel, root=document) => root.querySelector(sel);
-const bySelAll = (sel, root=document) => [...root.querySelectorAll(sel)];
-
-const log = (html, cls='') => {
-  const el = document.createElement('div');
-  el.className = cls; el.innerHTML = html;
-  const logEl = $('log'); if (!logEl) return;
-  logEl.appendChild(el); logEl.scrollTop = logEl.scrollHeight;
-};
-
-const switchTab = (id) => {
-  bySelAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
-  bySelAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
-};
-bySelAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
-
-const escapeHtml = (s)=> String(s)
-  .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
-  .replaceAll('"','&quot;').replaceAll("'",'&#039;');
-const linkify = (s)=> s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
-
-/* ---------------- Tiny UI Kit: modal + toast ---------------- */
+/* ---------------- Tiny UI Kit: modal ---------------- */
 function ensureLayer() {
   let layer = $('modal-layer');
   if (!layer) {
@@ -195,8 +203,8 @@ const AB_IDS = ['STR','DEX','CON','INT','WIS','CHA'];
 const cost = (score) => {
   if (score < 8) return 0;
   if (score <= 13) return score - 8;
-  if (score === 14) return 9;      // 7 + 2 bump
-  if (score === 15) return 11;     // 9 + 2 bump
+  if (score === 14) return 9;
+  if (score === 15) return 11;
   return 999;
 };
 const totalCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt($('ab_'+id)?.value||8,10)), 0);
@@ -282,6 +290,7 @@ function renderChars(charsObj){
     tbody.appendChild(tr);
   });
 }
+
 /* ---------------- Map ---------------- */
 let MAP = { w:20, h:20, tiles:[], tokens:{} };
 const mapCanvas = $('mapCanvas');
@@ -428,7 +437,14 @@ function renderEncounter(enc){
 }
 
 /* ---------------- Campaign UI helpers ---------------- */
-function gmControlsBar(isGM) {
+function amITheGM() {
+  // Prefer CAMPAIGN.gm if present; fall back to gmBadge text
+  const gmNameFromBadge = $('gmBadge')?.textContent?.replace(/^GM:\s*/, '')?.trim() || '';
+  const gmName = (CAMPAIGN.gm || gmNameFromBadge || '').trim();
+  return !!CURRENT_USER && !!gmName && CURRENT_USER === gmName;
+}
+
+function gmControlsBar() {
   const tab = $('campTab'); if (!tab) return;
   let bar = bySel('[data-gmbar]', tab);
   if (!bar) {
@@ -439,12 +455,13 @@ function gmControlsBar(isGM) {
     tab.prepend(bar);
   }
   bar.innerHTML = '';
-  if (isGM && !CAMPAIGN.started) {
+
+  if (amITheGM() && !CAMPAIGN.started) {
     const b = makeBtn('Start Campaign', { primary:true });
     b.addEventListener('click', ()=> socket.emit('campaign_start'));
     bar.appendChild(b);
   }
-  if (isGM && CAMPAIGN.pendingChoice) {
+  if (amITheGM() && CAMPAIGN.pendingChoice) {
     const f = makeBtn('Force Proceed (GM)', { danger:true });
     f.addEventListener('click', ()=> socket.emit('campaign_choice_force'));
     bar.appendChild(f);
@@ -452,6 +469,7 @@ function gmControlsBar(isGM) {
 }
 
 function renderCampaignState(c){
+  // Merge campaign data but keep the started flag we track locally
   CAMPAIGN = { ...CAMPAIGN, ...c };
 
   const meta = $('campMeta'), sceneEl = $('campScene'), choicesWrap = $('campChoices');
@@ -467,19 +485,19 @@ function renderCampaignState(c){
 
   // Choices
   choicesWrap.innerHTML = '';
-  const gmName = $('gmBadge')?.textContent?.replace(/^GM:\s*/, '') || '';
-  const amGM = gmName && bySel('#users .pill')?.textContent?.slice(1) === gmName;
-
-  gmControlsBar(amGM);
+  gmControlsBar();
 
   (current?.choices || []).forEach(ch=>{
     const btn = makeBtn(ch.text);
-    if (amGM && CAMPAIGN.started) {
-      // GM requests consent
+    if (amITheGM() && CAMPAIGN.started) {
       btn.addEventListener('click', ()=> socket.emit('campaign_choice_request', { choiceId: ch.id }));
+      btn.disabled = false;
+      btn.title = '';
+      btn.style.cursor = 'pointer';
     } else {
       btn.disabled = true;
       btn.title = CAMPAIGN.started ? 'Only the GM can choose' : 'Campaign not started yet';
+      btn.style.cursor = 'not-allowed';
     }
     choicesWrap.appendChild(btn);
   });
@@ -489,11 +507,9 @@ function renderCampaignState(c){
   if (handouts) handouts.innerHTML = (c.handouts||[]).map(h => `<li><strong>${escapeHtml(h.title)}</strong>: ${escapeHtml(h.content)}</li>`).join('');
   if (quests) quests.innerHTML = (c.quests||[]).map(q => `<li>${q.done ? '✅' : '⬜️'} ${escapeHtml(q.title)} <small><code>${escapeHtml(q.id)}</code></small></li>`).join('');
   if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by)}</strong>: ${escapeHtml(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`).join('');
-  // after your gm detection code (amGM)
-if (amGM) {
-  injectCampaignPicker();   // show GM’s campaign selector
-}
 
+  // GM-only picker after we know GM status
+  if (amITheGM()) injectCampaignPicker();
 }
 
 function wireCampaignInputs(){
@@ -527,6 +543,7 @@ function wireCampaignInputs(){
     socket.emit('campaign_quest_add', { title: t });
   });
 }
+
 /* ---------------- Character Creator Popup ---------------- */
 function openCharacterPopup(prefillName=''){
   const body = document.createElement('div');
@@ -547,7 +564,6 @@ function openCharacterPopup(prefillName=''){
     </div>
     <div class="small muted" id="pc_points">Points left: 27</div>
   </div>`;
-  // wire point-buy
   const pcPoints = body.querySelector('#pc_points');
   const pcCost = () => AB_IDS.reduce((sum,id)=> sum + cost(parseInt(body.querySelector('#pc_'+id)?.value||8,10)), 0);
   const pcUpdate = ()=>{
@@ -602,14 +618,21 @@ function openConsentModal({ text, requestedBy }){
 }
 
 /* ---------------- Socket events ---------------- */
-socket.on('identified', ({ username })=> log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys'));
+socket.on('identified', ({ username })=> {
+  CURRENT_USER = username;
+  log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys');
+});
 
-socket.on('joined', ({ lobby, history, gm })=>{
+socket.on('joined', ({ lobby, history, gm, settings })=>{
   if ($('log')) $('log').innerHTML = '';
   log(`Joined lobby <strong>${escapeHtml(lobby)}</strong>.`, 'sys');
   (history?.messages||[]).forEach(m=>renderChat(m));
   (history?.rolls||[]).forEach(r=>renderRoll(r));
   if ($('gmBadge')) $('gmBadge').textContent = `GM: ${gm || '—'}`;
+
+  // Respect current started state immediately on join (important when reloading)
+  CAMPAIGN.started = !!(settings && settings.campaignStarted);
+
   socket.emit('map_request');
   socket.emit('campaign_get');
   wireCampaignInputs();
@@ -627,9 +650,17 @@ socket.on('state', (state)=>{
   if ($('users')) $('users').innerHTML = (state.users||[]).map(u=>`<span class="pill">@${escapeHtml(u)}</span>`).join(' ');
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
+
+  // <- key part: keep CAMPAIGN.started in sync with server settings
+  if (state.settings && typeof state.settings.campaignStarted === 'boolean') {
+    CAMPAIGN.started = state.settings.campaignStarted;
+  }
+  if (state.gm) CAMPAIGN.gm = state.gm;
+
   if (state.campaign) {
-    CAMPAIGN.gm = state.gm || '';
     renderCampaignState(state.campaign);
+  } else {
+    gmControlsBar();
   }
 });
 
@@ -641,7 +672,8 @@ socket.on('map_ping', ({x,y})=>{
 
 /* Campaign events + flows */
 socket.on('campaign_state', (c)=> {
-  CAMPAIGN.gm = document.querySelector('#gmBadge')?.textContent?.replace(/^GM:\s*/, '') || CAMPAIGN.gm || '';
+  // do not clobber started flag
+  if (typeof c?.gm === 'string') CAMPAIGN.gm = c.gm;
   renderCampaignState(c);
 });
 socket.on('campaign_started', ({ sceneId })=>{
@@ -653,11 +685,13 @@ socket.on('character_required', ({ reason })=>{
   openCharacterPopup($('name')?.value.trim() || 'Hero');
 });
 socket.on('campaign_choice_requested', (payload)=>{
+  CAMPAIGN.pendingChoice = payload?.choiceId || true;
   openConsentModal(payload);
+  gmControlsBar();
 });
 
 /* ------- Theme toggle (CSP-safe) ------- */
-(() => {
+(()=>{
   const root = document.documentElement;
   const saved = localStorage.getItem('theme');
   if (saved) root.dataset.theme = saved;
@@ -673,7 +707,7 @@ resizeCells(); drawMap();
 window.addEventListener('resize', ()=>{ resizeCells(); drawMap(); });
 document.addEventListener('DOMContentLoaded', ()=>{
   document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
-    const id = btn.dataset.tab; 
+    const id = btn.dataset.tab;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
     document.querySelectorAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
   }));
