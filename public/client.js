@@ -1,5 +1,5 @@
-/* D&D Lobbies — client.js (fixed)
-   Start-lock + consent flow; robust GM detection; correct "campaign started" logic.
+/* D&D Lobbies — client.js (fixed v2)
+   Start-lock + consent flow; resilient GM/Start logic.
    Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
 */
 
@@ -456,12 +456,22 @@ function gmControlsBar() {
   }
   bar.innerHTML = '';
 
-  if (amITheGM() && !CAMPAIGN.started) {
+  // Always render Start button when not started.
+  // If you're not GM, the server will reject and we'll show the error.
+  if (!CAMPAIGN.started) {
     const b = makeBtn('Start Campaign', { primary:true });
-    b.addEventListener('click', ()=> socket.emit('campaign_start'));
+    b.addEventListener('click', ()=> {
+      log('Attempting to start campaign…', 'sys');
+      socket.emit('campaign_start');
+      // Ask for a fresh state shortly after, in case the server didn't broadcast campaign_started for some reason
+      setTimeout(()=>socket.emit('campaign_get'), 300);
+    });
+    // Slight visual hint if not GM
+    if (!amITheGM()) b.title = 'Only the GM can actually start — click will try anyway';
     bar.appendChild(b);
   }
-  if (amITheGM() && CAMPAIGN.pendingChoice) {
+
+  if (CAMPAIGN.pendingChoice && amITheGM()) {
     const f = makeBtn('Force Proceed (GM)', { danger:true });
     f.addEventListener('click', ()=> socket.emit('campaign_choice_force'));
     bar.appendChild(f);
@@ -489,7 +499,7 @@ function renderCampaignState(c){
 
   (current?.choices || []).forEach(ch=>{
     const btn = makeBtn(ch.text);
-    if (amITheGM() && CAMPAIGN.started) {
+    if (CAMPAIGN.started && amITheGM()) {
       btn.addEventListener('click', ()=> socket.emit('campaign_choice_request', { choiceId: ch.id }));
       btn.disabled = false;
       btn.title = '';
@@ -508,7 +518,7 @@ function renderCampaignState(c){
   if (quests) quests.innerHTML = (c.quests||[]).map(q => `<li>${q.done ? '✅' : '⬜️'} ${escapeHtml(q.title)} <small><code>${escapeHtml(q.id)}</code></small></li>`).join('');
   if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by)}</strong>: ${escapeHtml(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`).join('');
 
-  // GM-only picker after we know GM status
+  // GM-only picker hint
   if (amITheGM()) injectCampaignPicker();
 }
 
@@ -630,7 +640,7 @@ socket.on('joined', ({ lobby, history, gm, settings })=>{
   (history?.rolls||[]).forEach(r=>renderRoll(r));
   if ($('gmBadge')) $('gmBadge').textContent = `GM: ${gm || '—'}`;
 
-  // Respect current started state immediately on join (important when reloading)
+  // Respect current started state immediately on join
   CAMPAIGN.started = !!(settings && settings.campaignStarted);
 
   socket.emit('map_request');
@@ -641,7 +651,9 @@ socket.on('joined', ({ lobby, history, gm, settings })=>{
 socket.on('system', (t)=> log(escapeHtml(t), 'sys'));
 socket.on('chat', (m)=> renderChat(m));
 socket.on('roll', (r)=> renderRoll(r));
-socket.on('error_message', (msg)=> log(`Error: ${escapeHtml(msg)}`, 'sys'));
+socket.on('error_message', (msg)=> {
+  log(`Error: ${escapeHtml(msg)}`, 'sys');
+});
 
 socket.on('characters', renderChars);
 
@@ -651,7 +663,6 @@ socket.on('state', (state)=>{
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
 
-  // <- key part: keep CAMPAIGN.started in sync with server settings
   if (state.settings && typeof state.settings.campaignStarted === 'boolean') {
     CAMPAIGN.started = state.settings.campaignStarted;
   }
@@ -672,7 +683,6 @@ socket.on('map_ping', ({x,y})=>{
 
 /* Campaign events + flows */
 socket.on('campaign_state', (c)=> {
-  // do not clobber started flag
   if (typeof c?.gm === 'string') CAMPAIGN.gm = c.gm;
   renderCampaignState(c);
 });
