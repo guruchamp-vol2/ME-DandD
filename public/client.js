@@ -5,6 +5,50 @@
 
 const socket = io();
 let CAMPAIGN = { started:false, currentSceneId:null, pendingChoice:null, gm:'' };
+async function injectCampaignPicker() {
+  const tab = $('campTab'); if (!tab) return;
+
+  // Only one picker
+  if (bySel('[data-campaign-picker]', tab)) return;
+
+  const wrap = document.createElement('div');
+  wrap.dataset.campaignPicker = '1';
+  wrap.className = 'card';
+  wrap.style.margin = '8px 0';
+
+  wrap.innerHTML = `
+    <div class="hstack wrap gap-8">
+      <strong>Load Campaign</strong>
+      <select id="campaignSelect" class="w-30"><option>Loading…</option></select>
+      <button id="campaignLoadBtn" class="btn">Load</button>
+    </div>
+    <div id="campaignPreview" class="small muted" style="margin-top:6px;"></div>
+  `;
+  tab.prepend(wrap);
+
+  // fetch list
+  try {
+    const res = await fetch('/campaigns', { headers:{ 'accept':'application/json' } });
+    const list = await res.json();
+    const sel = $('campaignSelect');
+    sel.innerHTML = list.map(c => `<option value="${c.key}">${escapeHtml(c.title)}</option>`).join('') || '<option>(none found)</option>';
+
+    const preview = $('campaignPreview');
+    const renderPrev = () => {
+      const cur = list.find(x => x.key === sel.value);
+      preview.textContent = cur ? cur.summary : '';
+    };
+    sel.addEventListener('change', renderPrev);
+    renderPrev();
+
+    $('campaignLoadBtn').addEventListener('click', ()=>{
+      // Only GM should see this; server also enforces
+      socket.emit('campaign_load', { key: sel.value });
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
 
 /* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
@@ -445,6 +489,11 @@ function renderCampaignState(c){
   if (handouts) handouts.innerHTML = (c.handouts||[]).map(h => `<li><strong>${escapeHtml(h.title)}</strong>: ${escapeHtml(h.content)}</li>`).join('');
   if (quests) quests.innerHTML = (c.quests||[]).map(q => `<li>${q.done ? '✅' : '⬜️'} ${escapeHtml(q.title)} <small><code>${escapeHtml(q.id)}</code></small></li>`).join('');
   if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by)}</strong>: ${escapeHtml(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`).join('');
+  // after your gm detection code (amGM)
+if (amGM) {
+  injectCampaignPicker();   // show GM’s campaign selector
+}
+
 }
 
 function wireCampaignInputs(){
