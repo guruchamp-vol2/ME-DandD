@@ -1,239 +1,215 @@
-/* === D&D Theme Skin ===================================== */
-:root {
-  --bg: #f2ead3;          /* parchment */
-  --ink: #2b2a27;         /* ink */
-  --accent: #8b1e1e;      /* deep red */
+/* === D&D Lobbies — styles.css (drop-in replacement) ======================= */
+/* Theme variables (yours, with a couple of extras) */
+:root{
+  --bg: #f2ead3;
+  --ink: #2b2a27;
+  --accent: #8b1e1e;
   --accent-2: #b33a3a;
-  --surface: #fffaf0;     /* ivory card */
+  --surface: #fffaf0;
   --shadow: 0 10px 30px rgba(0,0,0,.18);
   --rune: 'IM Fell English SC', 'UnifrakturMaguntia', 'Cinzel', serif;
   --body: 'Crimson Text', Georgia, serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
 
-@font-face {
-  font-family: "Cinzel";
-  src: local("Cinzel");
-  font-display: swap;
-}
-
-/* Background parchment */
-html, body {
-  background: radial-gradient(1200px 800px at 30% 10%, #fff8e6, #f2ead3 60%, #e9dfc4);
-  color: var(--ink);
-  font-family: var(--body);
-}
-
-/* App bar */
-.appbar {
-  background: linear-gradient(180deg, #3b1f1f, #2b1313);
-  color: #fbe9e9;
-  border-bottom: 3px solid #5c1f1f;
-}
-.appbar .title { font-family: var(--rune); letter-spacing: .5px; font-size: 1.35rem; }
-.appbar .subtitle { opacity:.85 }
-
-/* Cards / panels */
-.panel.glass, .card, .main {
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  border: 1px solid rgba(0,0,0,.06);
-  border-radius: 14px;
-}
-
-/* Buttons */
-.btn {
-  border-radius: 10px;
-  border: 1px solid #6a2a2a;
-  padding: 8px 12px;
-  background: #faf3e5;
-  color: var(--ink);
-  cursor: pointer;
-  transition: transform .05s ease, background .2s ease;
-}
-.btn:hover { transform: translateY(-1px) }
-.btn.primary {
-  background: linear-gradient(180deg, var(--accent-2), var(--accent));
-  color: #fff;
-  border-color: #5a1818;
-}
-.btn.ghost {
-  background: transparent;
-  border-color: #b98c8c;
-}
-.btn.danger {
-  background: #601b1b;
-  color: #fff;
-}
-
-/* Pills, chips, tabs */
-.pill, .chip {
-  background: #f7e1e1;
-  color: #501616;
-  border: 1px solid #c98787;
-  border-radius: 999px;
-  padding: 3px 10px;
-}
-.tabs .tab-btn.active {
-  border-bottom: 3px solid var(--accent);
-  color: var(--accent);
-  font-weight: 700;
-}
-
-/* Log & code */
-.log { background: #fffdf6; border: 1px dashed #d6c7a8; }
-code, .table code {
-  font-family: var(--mono);
-  background: #fff1dc;
-  border: 1px solid #e4caa0;
-  padding: 0 4px;
-  border-radius: 6px;
-}
-
-/* Map */
-.mapwrap .map {
-  background: #f8f3e3;
-  border: 2px solid #d2b48c;
-  border-radius: 12px;
-}
-
-/* Modal layer (from client.js) */
-#modal-layer h3 {
-  font-family: var(--rune);
-  color: var(--accent);
-}
-
-/* Inputs */
-input, select, textarea {
-  background: #fffaf0;
-  border: 1px solid #c3ab86;
-  border-radius: 10px;
-  padding: 8px 10px;
-}
-input:focus, select:focus, textarea:focus {
-  outline: 2px solid #b26a6a33;
-  border-color: #b26a6a;
-}
-
-/* Small ornaments */
-.section-title, .panel-title {
-  font-family: var(--rune);
-  color: var(--accent);
-  letter-spacing: .5px;
-}
-
-/* Mini-map */
-canvas.mini {
-  border: 1px solid #d2b48c;
-  background: #fffdf4;
-}
-
-
-
-@keyframes modalFade {
-  from { opacity: 0; } to { opacity: 1; }
-}
-@keyframes modalPop {
-  from { transform: translateY(6px) scale(.98); opacity: 0.0; }
-  to   { transform: translateY(0)   scale(1);    opacity: 1; }
-}
-
-/* Buttons inside modals align to the end via container (see .hstack.end already) */
-
-/* ===================== Minor polish / utilities ===================== */
-.btn.icon { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; }
-.btn[disabled], .btn:disabled { opacity: .55; cursor: not-allowed; }
-
-.small { font-size: 12px; color: var(--muted); }
-.danger { background: color-mix(in srgb, var(--danger) 20%, transparent); color: #fff; }
-
-/* Explicit chip stronger style when used as a warning */
-.chip.danger {
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
-  background: color-mix(in srgb, var(--danger) 20%, var(--card));
-  color: #fff;
-}
-
-/* Better scroll aesthetics for log and modal bodies */
-.log, .modal__card {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--primary) 40%, #808080) transparent;
-}
-.log::-webkit-scrollbar,
-.modal__card::-webkit-scrollbar { width: 8px; height: 8px; }
-.log::-webkit-scrollbar-thumb,
-.modal__card::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--primary) 35%, #606060);
-  border-radius: 999px;
-}
-
-/* Buttons inside choices area */
-#campChoices .btn { padding: 8px 12px; border-radius: 12px; }
-
-/* GM Tools header spacing tweak when we inject the Start button */
-#gmTools > .hstack:first-child { margin-bottom: 8px; }
-
-/* Accessibility: focus ring */
-:where(button, .btn, input, select, textarea, .tab-btn):focus-visible {
-  outline: none;
-  box-shadow: var(--ring);
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-}
-
-/* Optional: soft highlight for the "waiting for GM" chip */
-#campTab .chip { background: color-mix(in srgb, var(--primary-2) 12%, var(--card)); }
-
-/* Ensure tables don't overflow on small screens inside cards */
-.table-wrap { overflow: auto; max-width: 100%; }
-
-/* Slightly tighter panel-body spacing on mobile */
-@media (max-width: 640px){
-  .panel-body { padding: 10px; }
-  .tabs { gap: 6px; }
-}
-
-/* Make sure modal content never gets hidden behind footer on tiny screens */
-@media (max-height: 560px){
-  .modal__card { max-height: calc(100vh - 32px); }
-}
-/* === Vars your stylesheet referenced but didn't define === */
-:root{
   --muted: #6b6256;
-  --primary: #8b1e1e;
-  --primary-2: #b33a3a;
+  --primary: var(--accent);
+  --primary-2: var(--accent-2);
   --danger: #b91c1c;
   --border: rgba(0,0,0,.12);
   --card: var(--surface);
   --ring: 0 0 0 3px rgba(179,58,58,.22);
 }
 
-/* Modal card styling to match your JS-created modal */
-#modal-layer > div {
-  animation: modalPop .14s ease-out, modalFade .12s ease-out;
+/* Background parchment */
+html, body { height: 100%; }
+html, body {
+  background: radial-gradient(1200px 800px at 30% 10%, #fff8e6, #f2ead3 60%, #e9dfc4);
+  color: var(--ink);
+  font-family: var(--body);
+  margin: 0;
 }
-#modal-layer > div {
+
+/* --- App Bar ------------------------------------------------------------- */
+.appbar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, #3b1f1f, #2b1313);
+  color: #fbe9e9; border-bottom: 3px solid #5c1f1f;
+}
+.appbar .title { font-family: var(--rune); letter-spacing: .5px; font-size: 1.35rem; }
+.appbar .subtitle { opacity:.85; font-size:.9rem; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.d20 {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: grid; place-items: center; font-weight: 700;
+  background: #752424; border: 2px solid #e9c6c6; color: #fff;
+  box-shadow: inset 0 -2px 0 rgba(0,0,0,.25);
+  font-family: var(--rune);
+}
+.appbar-actions { display: flex; align-items: center; gap: 8px; }
+
+/* --- Layout -------------------------------------------------------------- */
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px; padding: 16px; max-width: 1200px; margin: 0 auto;
+}
+@media (max-width: 980px){
+  .layout { grid-template-columns: 1fr; }
+}
+
+/* Panels / cards */
+.panel.glass, .card, .main {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
   box-shadow: var(--shadow);
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 14px;
+}
+.panel.glass, .card { padding: 12px; }
+.main { padding: 0; overflow: hidden; }
+
+/* Sidebar specifics */
+.panel-title { margin: 0 0 8px; font-family: var(--rune); color: var(--accent); }
+.list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.list li { padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; background: #fffdf7; cursor: pointer; }
+.userbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill, .chip {
+  background: #f7e1e1; color: #501616; border: 1px solid #c98787;
+  border-radius: 999px; padding: 3px 10px; font-size: 12px;
 }
 
-/* Improve log contrast just a touch */
-.log { border-color: #d3c39e; }
-
-/* Fallbacks for color-mix() users without support — harmless if supported */
-@supports not (color: color-mix(in srgb, red, blue)) {
-  .chip.danger { background: #8b1e1e; border-color: #5a1818; }
-  .log, .modal__card { scrollbar-color: #9b6b6b transparent; }
+/* Forms */
+.field { display: grid; gap: 4px; }
+.field > span { font-size: .9rem; color: var(--muted); }
+input, select, textarea {
+  background: #fffaf0; border: 1px solid #c3ab86; border-radius: 10px; padding: 8px 10px;
 }
+input:focus, select:focus, textarea:focus { outline: 2px solid #b26a6a33; border-color: #b26a6a; }
+input.w-10 { width: 80px; }
+input.w-20 { width: 160px; }
+input.w-30 { width: 220px; }
+input.grow, textarea.grow { width: 100%; }
 
-/* Small utilities your UI hints use */
+/* Buttons */
+.btn {
+  border-radius: 10px; border: 1px solid #6a2a2a; padding: 8px 12px;
+  background: #faf3e5; color: var(--ink); cursor: pointer;
+  transition: transform .05s ease, background .2s ease;
+}
+.btn:hover { transform: translateY(-1px) }
+.btn.primary { background: linear-gradient(180deg, var(--accent-2), var(--accent)); color: #fff; border-color: #5a1818; }
+.btn.ghost { background: transparent; border-color: #b98c8c; }
+.btn.danger { background: #601b1b; color: #fff; }
+.btn.icon { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; }
+.btn[disabled] { opacity:.55; cursor:not-allowed; }
+
+/* Stacks & utilities */
 .hstack { display:flex; align-items:center; gap:.5rem; }
-.hstack.wrap { flex-wrap: wrap; }
 .vstack { display:flex; flex-direction:column; gap:.5rem; }
+.hstack.wrap { flex-wrap: wrap; }
 .space-between { justify-content: space-between; }
 .end { justify-content: flex-end; }
+.muted { color: var(--muted); }
+.divider { height: 1px; background: #dfd2b3; margin: 10px 0; }
+
+/* Tabs */
+.tabs {
+  display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #e2d5b4;
+  background: linear-gradient(180deg, #fffaf0, #fff3da);
+  position: sticky; top: 48px; z-index: 40;
+}
+.tab-btn {
+  appearance:none; background: transparent; border: 0; padding: 10px 12px; border-radius: 10px;
+  font-weight: 700; color: #6a3a3a; cursor: pointer;
+}
+.tab-btn.active { border-bottom: 3px solid var(--accent); color: var(--accent); background: #fff7ea; }
+
+/* Tab bodies */
+.panel-body { display: none; padding: 14px; }
+.panel-body.active { display: block; }
+
+/* Composer rows (chat + notes) */
+.composer { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+.hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+code, .table code {
+  font-family: var(--mono); background: #fff1dc; border: 1px solid #e4caa0; padding: 0 4px; border-radius: 6px;
+}
+
+/* Log */
+.log {
+  height: 220px; overflow: auto; padding: 8px;
+  background: #fffdf6; border: 1px dashed #d6c7a8; border-radius: 12px;
+}
+
+/* Tables */
+.table-wrap { overflow: auto; max-width: 100%; }
+.table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+.table th, .table td { border-bottom: 1px solid #eadfbe; padding: 6px 8px; text-align: left; }
+.table thead th { position: sticky; top: 0; background: #fff7ea; }
+
+/* Grids */
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
+.grid-6 { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 10px; }
+.grid { display: grid; gap: 12px; }
+.cols-1 { grid-template-columns: 1fr; }
+.cols-2lg { grid-template-columns: 1fr; }
+@media (min-width: 980px){ .cols-2lg { grid-template-columns: 1.2fr .8fr; } }
+.sm-grid-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+@media (max-width: 680px){ .grid-6, .sm-grid-3 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+
+/* Ability block */
+.abilities { border: 1px solid #e6d7b2; border-radius: 12px; padding: 8px; background: #fffdf3; }
+.abilities-head { display:flex; justify-content: space-between; align-items:center; margin-bottom: 6px; }
+.ability { display: grid; gap: 4px; text-align: center; }
+.ability span { font-weight: 700; font-family: var(--rune); color: var(--accent); }
+
+/* Map */
+.toolbar { display: grid; gap: 10px; margin-bottom: 10px; }
+.mapwrap { border-radius: 12px; overflow: hidden; border: 2px solid #d2b48c; background: #f8f3e3; }
+.mapwrap .map { display:block; width:100%; height:auto; }
+canvas.mini { border: 1px solid #d2b48c; background: #fffdf4; border-radius: 8px; }
+
+/* Toggles */
+.toggle { display: inline-flex; align-items: center; gap: 6px; }
+.toggle input { accent-color: var(--accent); }
+
+/* GM Tools */
+.gm-tools h3.section-title { margin-top: 0; }
+.section-title, .panel-title { font-family: var(--rune); color: var(--accent); letter-spacing: .5px; }
+
+/* Footer */
+.footer { padding: 16px; text-align: center; color: var(--muted); }
+
+/* Modal (client.js creates it) */
+#modal-layer { animation: modalFade .12s ease-out; }
+#modal-layer > div { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+#modal-layer h3 { font-family: var(--rune); color: var(--accent); }
+
+@keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalPop { from { transform: translateY(6px) scale(.98); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+
+/* Accessibility */
+:where(button, .btn, input, select, textarea, .tab-btn):focus-visible {
+  outline: none; box-shadow: var(--ring); border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+/* Scrollbars */
+.log, .modal__card { scrollbar-width: thin; scrollbar-color: #9b6b6b transparent; }
+.log::-webkit-scrollbar, .modal__card::-webkit-scrollbar { width: 8px; height: 8px; }
+.log::-webkit-scrollbar-thumb, .modal__card::-webkit-scrollbar-thumb { background: #9b6b6b; border-radius: 999px; }
+
+/* Small screens */
+@media (max-width: 640px){
+  .panel-body { padding: 10px; }
+  .tabs { gap: 6px; }
+  .log { height: 180px; }
+}
 
 /* Make tab buttons look clickable on touch devices */
 .tab-btn { cursor: pointer; }
 
+/* Slight polish */
+.log { border-color: #d3c39e; }
