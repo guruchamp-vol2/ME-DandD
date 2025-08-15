@@ -1,5 +1,5 @@
-/* D&D Lobbies — client.js (fixed, downloadable)
-   Start-lock + consent flow; robust GM detection; correct "campaign started" sync.
+/* D&D Lobbies — client.js (GM detection + optimistic start fix)
+   Works with start-lock, character popup, and consent flow.
    Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
 */
 
@@ -7,6 +7,7 @@ const socket = io();
 
 /* ---------------- Global state ---------------- */
 let CURRENT_USER = null; // set on 'identified'
+let IS_GM = false;       // updated from server state
 let CAMPAIGN = {
   started: false,
   currentSceneId: null,
@@ -74,12 +75,11 @@ async function injectCampaignPicker() {
     renderPrev();
 
     $('campaignLoadBtn').addEventListener('click', ()=>{
+      log('GM: loading campaign…', 'sys');
       socket.emit('campaign_load', { key: $('campaignSelect').value });
-      log('Requested: load campaign', 'sys');
     });
   } catch (e) {
     console.error(e);
-    log('Failed to fetch campaigns list', 'sys');
   }
 }
 
@@ -439,10 +439,9 @@ function renderEncounter(enc){
 }
 
 /* ---------------- Campaign UI helpers ---------------- */
-function amITheGM() {
-  const gmNameFromBadge = $('gmBadge')?.textContent?.replace(/^GM:\s*/, '')?.trim() || '';
-  const gmName = (CAMPAIGN.gm || gmNameFromBadge || '').trim();
-  return !!CURRENT_USER && !!gmName && CURRENT_USER === gmName;
+function updateIsGM(gmName){
+  const gm = (gmName || CAMPAIGN.gm || '').trim();
+  IS_GM = !!CURRENT_USER && !!gm && CURRENT_USER.trim() === gm;
 }
 
 function gmControlsBar() {
@@ -457,25 +456,30 @@ function gmControlsBar() {
   }
   bar.innerHTML = '';
 
-  if (amITheGM() && !CAMPAIGN.started) {
+  if (IS_GM && !CAMPAIGN.started) {
     const b = makeBtn('Start Campaign', { primary:true });
     b.addEventListener('click', ()=> {
+      // Optimistic UI — in case server event is delayed, unlock GM choices immediately
+      log('GM: starting campaign…', 'sys');
+      CAMPAIGN.started = true;
+      gmControlsBar();
+      renderCampaignState(CAMPAIGN); // re-render to enable choice buttons for GM
       socket.emit('campaign_start');
-      log('Requested: start campaign', 'sys');
     });
     bar.appendChild(b);
   }
-  if (amITheGM() && CAMPAIGN.pendingChoice) {
+  if (IS_GM && CAMPAIGN.pendingChoice) {
     const f = makeBtn('Force Proceed (GM)', { danger:true });
     f.addEventListener('click', ()=> {
+      log('GM: force proceed…', 'sys');
       socket.emit('campaign_choice_force');
-      log('Requested: force proceed', 'sys');
     });
     bar.appendChild(f);
   }
 }
 
 function renderCampaignState(c){
+  // Merge campaign data but keep the started flag we track locally
   CAMPAIGN = { ...CAMPAIGN, ...c };
 
   const meta = $('campMeta'), sceneEl = $('campScene'), choicesWrap = $('campChoices');
@@ -495,7 +499,7 @@ function renderCampaignState(c){
 
   (current?.choices || []).forEach(ch=>{
     const btn = makeBtn(ch.text);
-    if (amITheGM() && CAMPAIGN.started) {
+    if (IS_GM && CAMPAIGN.started) {
       btn.addEventListener('click', ()=> socket.emit('campaign_choice_request', { choiceId: ch.id }));
       btn.disabled = false;
       btn.title = '';
@@ -512,10 +516,10 @@ function renderCampaignState(c){
   const handouts = $('handouts'), quests = $('quests'), notes = $('notes');
   if (handouts) handouts.innerHTML = (c.handouts||[]).map(h => `<li><strong>${escapeHtml(h.title)}</strong>: ${escapeHtml(h.content)}</li>`).join('');
   if (quests) quests.innerHTML = (c.quests||[]).map(q => `<li>${q.done ? '✅' : '⬜️'} ${escapeHtml(q.title)} <small><code>${escapeHtml(q.id)}</code></small></li>`).join('');
-  if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by||'GM')}</strong>: ${escapeHtml(n.text||'')} <em>${n.ts?new Date(n.ts).toLocaleTimeString():''}</em></div>`).join('');
+  if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by)}</strong>: ${escapeHtml(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`).join('');
 
   // GM-only picker after we know GM status
-  if (amITheGM()) injectCampaignPicker();
+  if (IS_GM) injectCampaignPicker();
 }
 
 function wireCampaignInputs(){
@@ -624,7 +628,11 @@ function openConsentModal({ text, requestedBy }){
 }
 
 /* ---------------- Socket events ---------------- */
-socket.on('identified', ({ username })=>{
+socket.on('connect_error', (err)=>{
+  log(`Socket error: ${escapeHtml(err?.message || String(err))}`, 'sys');
+});
+
+socket.on('identified', ({ username })=> {
   CURRENT_USER = username;
   log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys');
 });
@@ -636,11 +644,19 @@ socket.on('joined', ({ lobby, history, gm, settings })=>{
   (history?.rolls||[]).forEach(r=>renderRoll(r));
   if ($('gmBadge')) $('gmBadge').textContent = `GM: ${gm || '—'}`;
 
+  // Respect current started state immediately on join (important when reloading)
   CAMPAIGN.started = !!(settings && settings.campaignStarted);
+
+  // GM status
+  CAMPAIGN.gm = gm || CAMPAIGN.gm;
+  updateIsGM(gm);
 
   socket.emit('map_request');
   socket.emit('campaign_get');
   wireCampaignInputs();
+
+  // If GM, ensure picker is present
+  if (IS_GM) injectCampaignPicker();
 });
 
 socket.on('system', (t)=> log(escapeHtml(t), 'sys'));
@@ -656,10 +672,12 @@ socket.on('state', (state)=>{
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
 
+  // Sync campaign started flag from server
   if (state.settings && typeof state.settings.campaignStarted === 'boolean') {
     CAMPAIGN.started = state.settings.campaignStarted;
   }
   if (state.gm) CAMPAIGN.gm = state.gm;
+  updateIsGM(state.gm);
 
   if (state.campaign) {
     renderCampaignState(state.campaign);
@@ -677,6 +695,7 @@ socket.on('map_ping', ({x,y})=>{
 /* Campaign events + flows */
 socket.on('campaign_state', (c)=> {
   if (typeof c?.gm === 'string') CAMPAIGN.gm = c.gm;
+  updateIsGM(c?.gm);
   renderCampaignState(c);
 });
 socket.on('campaign_started', ({ sceneId })=>{
