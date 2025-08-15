@@ -1,4 +1,4 @@
-/* === D&D Lobbies — styles.css (drop-in replacement) ======================= */
+/* === D&D Lobbies â€” styles.css (drop-in replacement) ======================= */
 /* Theme variables (yours, with a couple of extras) */
 :root{
   --bg: #f2ead3;
@@ -213,3 +213,31 @@ canvas.mini { border: 1px solid #d2b48c; background: #fffdf4; border-radius: 8px
 
 /* Slight polish */
 .log { border-color: #d3c39e; }
+
+/* ==================== Campaign tab tightening ==================== */
+/* Reduce default heading and paragraph margins inside campaign cards */
+#campTab .card h3,
+#campTab .card h4 { margin: 0 0 6px; line-height: 1.2; }
+#campTab .card p { margin: 0; }
+#campTab .card .small { margin-top: 6px; }
+
+/* Bring cards closer together and trim extra space at the top */
+#campTab .card { margin: 8px 0; }
+.panel-body#campTab > .card:first-child { margin-top: 4px; }
+
+/* Choices: keep near the scene text and nicely wrapped */
+#campChoices {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Optional: keep GM tools visible under sticky tabs */
+#gmTools { position: sticky; top: 96px; }
+
+/* On small screens, reduce spacing even more */
+@media (max-width: 680px){
+  #campTab .card { margin: 6px 0; }
+  #gmTools { top: 88px; }
+}
