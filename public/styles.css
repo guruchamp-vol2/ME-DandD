@@ -124,7 +124,7 @@ html, body {
 .panel-body{ display:none; padding: 14px; }
 .panel-body.active{ display:block; }
 
-/* Kill â€œmystery gapâ€: prevent first-child top-margin collapse in panels */
+/* Kill "mystery gap": prevent first-child top-margin collapse in panels */
 .panel-body > :first-child{ margin-top: 0 !important; }
 .card > :first-child{ margin-top: 0; }
 .section-title{ margin: 0 0 8px; font-family: var(--rune); color: var(--accent); }
