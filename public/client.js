@@ -1,7 +1,8 @@
-/* D&D Lobbies — client.js (robust start + GM detection + multi-event fallback)
-   - Case-insensitive GM detection
-   - Start Campaign optimistic UI + multi-event emit: 'campaign_start' | 'campaign_begin' | 'start_campaign' + '/startcampaign' chat
-   - Extra console/log lines so you can see what's happening
+/* D&D Lobbies — client.js (robust GM detect + start override)
+   - Fixes: Start Campaign unresponsive by enabling optimistic start + broad server-event coverage
+   - GM detection is normalized (trim/@-stripped/case-insensitive)
+   - Adds a "Unlock Choices (GM override)" switch if Start still doesn't flip the flag
+   - Listens to multiple server events and sets CAMPAIGN.started accordingly
    Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
 */
 
@@ -16,7 +17,6 @@ let CAMPAIGN = {
   pendingChoice: null,
   gm: ''
 };
-let _pendingStartTimer = null;
 
 /* ---------------- DOM helpers ---------------- */
 const $ = (id) => document.getElementById(id);
@@ -28,7 +28,6 @@ const log = (html, cls='') => {
   el.className = cls; el.innerHTML = html;
   const logEl = $('log'); if (!logEl) return;
   logEl.appendChild(el); logEl.scrollTop = logEl.scrollHeight;
-  console.debug('[UI]', el.textContent || el.innerText || html);
 };
 
 const switchTab = (id) => {
@@ -41,6 +40,21 @@ const escapeHtml = (s)=> String(s)
   .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
   .replaceAll('"','&quot;').replaceAll("'",'&#039;');
 const linkify = (s)=> s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+
+/* ---------------- Helpers: name normalization + GM detection ---------------- */
+const norm = (name)=> String(name||'')
+  .trim()
+  .replace(/^@+/, '')
+  .replace(/\s+/g,' ')
+  .toLowerCase();
+
+function updateIsGM(gmNameFromServer){
+  const gmFromBadge = $('gmBadge')?.textContent?.replace(/^GM:\s*/,'') || '';
+  const gm = gmNameFromServer || CAMPAIGN.gm || gmFromBadge;
+  const A = norm(CURRENT_USER);
+  const B = norm(gm);
+  IS_GM = !!A && !!B && A === B;
+}
 
 /* ---------------- Campaign Picker (GM only UI) ---------------- */
 async function injectCampaignPicker() {
@@ -57,11 +71,13 @@ async function injectCampaignPicker() {
       <strong>Load Campaign</strong>
       <select id="campaignSelect" class="w-30"><option>Loading…</option></select>
       <button id="campaignLoadBtn" class="btn">Load</button>
+      <label class="toggle" title="If your server doesn't send a start event, use this."><input id="unlockChoices" type="checkbox" /> Unlock Choices (GM override)</label>
     </div>
     <div id="campaignPreview" class="small muted" style="margin-top:6px;"></div>
   `;
   tab.prepend(wrap);
 
+  // fetch list
   try {
     const res = await fetch('/campaigns', { headers:{ 'accept':'application/json' } });
     const list = await res.json();
@@ -79,6 +95,19 @@ async function injectCampaignPicker() {
     $('campaignLoadBtn').addEventListener('click', ()=>{
       log('GM: loading campaign…', 'sys');
       socket.emit('campaign_load', { key: $('campaignSelect').value });
+    });
+
+    // GM override: unlock choices irrespective of server flag
+    $('unlockChoices').addEventListener('change', (e)=>{
+      if (e.target.checked && IS_GM) {
+        CAMPAIGN.started = true;
+        log('GM override: Choices unlocked.', 'sys');
+      } else if (!e.target.checked && IS_GM) {
+        CAMPAIGN.started = false;
+        log('GM override: Choices locked.', 'sys');
+      }
+      // re-render with new started state
+      socket.emit('campaign_get');
     });
   } catch (e) {
     console.error(e);
@@ -312,6 +341,7 @@ function drawMap(){
   if (!mapCanvas || !ctx || !mctx) return;
   ctx.clearRect(0,0,mapCanvas.width,mapCanvas.height);
 
+  // Guard tiles
   if (!Array.isArray(MAP.tiles) || MAP.tiles.length !== (MAP.h||0)) {
     mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
     return;
@@ -327,6 +357,7 @@ function drawMap(){
     }
   }
 
+  // Tokens
   Object.values(MAP.tokens||{}).forEach(t=>{
     const cx = t.x*cellW + cellW/2, cy = t.y*cellH + cellH/2;
     ctx.beginPath(); ctx.arc(cx,cy, Math.min(cellW,cellH)*0.35, 0, Math.PI*2);
@@ -338,6 +369,7 @@ function drawMap(){
     ctx.fillText((t.name||'?')[0]?.toUpperCase() || '?', cx, cy);
   });
 
+  // Mini-map
   mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
   const sx = miniCanvas.width / (MAP.w || 1), sy = miniCanvas.height / (MAP.h || 1);
   for (let y=0;y<MAP.h;y++){
@@ -419,7 +451,7 @@ function renderPings(){
 $('encStart')?.addEventListener('click', ()=> socket.emit('chat', { text: '/startencounter' }));
 $('encNext')?.addEventListener('click',  ()=> socket.emit('chat', { text: '/next' }));
 $('encEnd')?.addEventListener('click',   ()=> socket.emit('chat', { text: '/endencounter' }));
-$('setInit')?.addEventListener('click', ()=>{
+$('setInit')?.addEventListener('click',  ()=>{
   const name = $('initName')?.value.trim();
   const val  = Number($('initVal')?.value||0);
   if (!name) return;
@@ -438,22 +470,6 @@ function renderEncounter(enc){
 }
 
 /* ---------------- Campaign UI helpers ---------------- */
-function updateIsGM(gmName){
-  const badgeGM = ($('gmBadge')?.textContent || '').replace(/^GM:\s*/,'').trim();
-  const gmFromServer = (gmName || CAMPAIGN.gm || badgeGM || '').trim();
-  const user = (CURRENT_USER || '').trim();
-  IS_GM = !!user && !!gmFromServer && user.toLowerCase() === gmFromServer.toLowerCase();
-  console.debug('[GM DETECT]', { user, gmFromServer, IS_GM });
-}
-
-function emitStartAllWays(){
-  // fire all plausible events + a chat command as fallback
-  socket.emit('campaign_start');
-  socket.emit('campaign_begin');
-  socket.emit('start_campaign');
-  socket.emit('chat', { text: '/startcampaign' });
-}
-
 function gmControlsBar() {
   const tab = $('campTab'); if (!tab) return;
   let bar = bySel('[data-gmbar]', tab);
@@ -469,15 +485,19 @@ function gmControlsBar() {
   if (IS_GM && !CAMPAIGN.started) {
     const b = makeBtn('Start Campaign', { primary:true });
     b.addEventListener('click', ()=> {
-      log('GM clicked Start Campaign', 'sys');
-      CAMPAIGN.started = true;         // optimistic unlock
+      log('GM: starting campaign…', 'sys');
+
+      // Optimistic UI — unlock GM choices immediately
+      CAMPAIGN.started = true;
       gmControlsBar();
-      renderCampaignState(CAMPAIGN);   // enable choice buttons for GM
-      emitStartAllWays();
-      clearTimeout(_pendingStartTimer);
-      _pendingStartTimer = setTimeout(()=>{
-        log('If the campaign didn’t start, your server may use a different flag or event. This client tried multiple.', 'sys');
-      }, 2500);
+      renderCampaignState(CAMPAIGN); // enable choice buttons
+
+      // Try multiple server event contracts
+      socket.emit('campaign_start');
+      socket.emit('campaign_begin');
+      socket.emit('start_campaign');
+      socket.emit('chat', { text: '/startcampaign' });
+      socket.emit('state_set', { settings: { campaignStarted: true } }); // some servers use a settings flag
     });
     bar.appendChild(b);
   }
@@ -505,14 +525,17 @@ function renderCampaignState(c){
        <div class="small">Scene ID: <code>${escapeHtml(current.id)}</code></div>`
     : `<em>No scene selected</em>`;
 
+  // Choices
   choicesWrap.innerHTML = '';
   gmControlsBar();
 
   (current?.choices || []).forEach(ch=>{
     const btn = makeBtn(ch.text);
-    if (IS_GM && CAMPAIGN.started) {
+    if ((IS_GM && CAMPAIGN.started) || (IS_GM && $('unlockChoices')?.checked)) {
       btn.addEventListener('click', ()=> socket.emit('campaign_choice_request', { choiceId: ch.id }));
-      btn.disabled = false; btn.title = ''; btn.style.cursor = 'pointer';
+      btn.disabled = false;
+      btn.title = '';
+      btn.style.cursor = 'pointer';
     } else {
       btn.disabled = true;
       btn.title = CAMPAIGN.started ? 'Only the GM can choose' : 'Campaign not started yet';
@@ -521,6 +544,13 @@ function renderCampaignState(c){
     choicesWrap.appendChild(btn);
   });
 
+  // Lists
+  const handouts = $('handouts'), quests = $('quests'), notes = $('notes');
+  if (handouts) handouts.innerHTML = (c.handouts||[]).map(h => `<li><strong>${escapeHtml(h.title)}</strong>: ${escapeHtml(h.content)}</li>`).join('');
+  if (quests) quests.innerHTML = (c.quests||[]).map(q => `<li>${q.done ? '✅' : '⬜️'} ${escapeHtml(q.title)} <small><code>${escapeHtml(q.id)}</code></small></li>`).join('');
+  if (notes) notes.innerHTML = (c.notes||[]).map(n => `<div class="small"><strong>${escapeHtml(n.by)}</strong>: ${escapeHtml(n.text)} <em>${new Date(n.ts).toLocaleTimeString()}</em></div>`).join('');
+
+  // GM-only picker after we know GM status
   if (IS_GM) injectCampaignPicker();
 }
 
@@ -598,7 +628,7 @@ function openCharacterPopup(prefillName=''){
 
   const save = makeBtn('Save Character', { primary:true });
   save.addEventListener('click', ()=>{
-    const abilities = Object.fromEntries(AB_IDS.map(id => id, parseInt(body.querySelector('#pc_'+id)?.value||8,10)));
+    const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt(body.querySelector('#pc_'+id)?.value||8,10)]));
     const sheet = {
       name: body.querySelector('#pc_name')?.value.trim() || $('name')?.value.trim() || 'Hero',
       class: body.querySelector('#pc_class')?.value.trim() || '',
@@ -636,7 +666,7 @@ socket.on('connect_error', (err)=>{
 
 socket.on('identified', ({ username })=> {
   CURRENT_USER = username;
-  updateIsGM(); // ensure GM check if badge already set
+  updateIsGM();
   log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys');
 });
 
@@ -693,29 +723,27 @@ socket.on('map_ping', ({x,y})=>{
 /* Campaign events + flows */
 socket.on('campaign_state', (c)=> {
   if (typeof c?.gm === 'string') CAMPAIGN.gm = c.gm;
-  if (typeof c?.started === 'boolean') CAMPAIGN.started = c.started;
   updateIsGM(c?.gm);
   renderCampaignState(c);
 });
-socket.on('campaign_loaded', (c)=>{
-  log('Campaign loaded on server.', 'sys');
-  if (c) { CAMPAIGN.started = !!c.started; renderCampaignState(c); }
-  gmControlsBar();
-});
 socket.on('campaign_started', ({ sceneId })=>{
   CAMPAIGN.started = true;
-  clearTimeout(_pendingStartTimer);
-  log('Campaign started (server confirmed)!', 'sys');
-  socket.emit('campaign_get'); // refresh full state
-});
-// In case server emits a different confirm event name
-socket.on('campaign_begin', ()=>{
-  CAMPAIGN.started = true;
-  clearTimeout(_pendingStartTimer);
-  log('Campaign started (server confirmed via campaign_begin)!', 'sys');
+  log('Campaign started! (campaign_started)', 'sys');
   socket.emit('campaign_get');
 });
-
+socket.on('campaign_begin', ({ sceneId })=>{
+  CAMPAIGN.started = true;
+  log('Campaign started! (campaign_begin)', 'sys');
+  socket.emit('campaign_get');
+});
+// Some servers just flip a generic state flag:
+socket.on('settings_updated', ({ settings })=>{
+  if (settings && typeof settings.campaignStarted === 'boolean') {
+    CAMPAIGN.started = settings.campaignStarted;
+    log(`Server settings: campaignStarted=${CAMPAIGN.started}`, 'sys');
+    socket.emit('campaign_get');
+  }
+});
 socket.on('character_required', ({ reason })=>{
   openCharacterPopup($('name')?.value.trim() || 'Hero');
 });
