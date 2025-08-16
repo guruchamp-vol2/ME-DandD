@@ -1,8 +1,8 @@
-/* D&D Lobbies — client.js (robust GM detect + start override)
-   - Fixes: Start Campaign unresponsive by enabling optimistic start + broad server-event coverage
-   - GM detection is normalized (trim/@-stripped/case-insensitive)
-   - Adds a "Unlock Choices (GM override)" switch if Start still doesn't flip the flag
-   - Listens to multiple server events and sets CAMPAIGN.started accordingly
+/* D&D Lobbies — client.js (GM override + resilient start sync)
+   - Robust GM detection (case/space/@ safe)
+   - Optimistic Start + LOCAL OVERRIDE so server can't immediately flip it back
+   - Listens for multiple server events: campaign_started, campaign_begin, settings_updated
+   - Adds a GM-only "Unlock Choices (override)" toggle in the Campaign area
    Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
 */
 
@@ -10,7 +10,8 @@ const socket = io();
 
 /* ---------------- Global state ---------------- */
 let CURRENT_USER = null; // set on 'identified'
-let IS_GM = false;       // updated from server state
+let IS_GM = false;       // updated from server
+let LOCAL_OVERRIDE_STARTED = false; // if true (GM), ignore false coming from server
 let CAMPAIGN = {
   started: false,
   currentSceneId: null,
@@ -41,19 +42,11 @@ const escapeHtml = (s)=> String(s)
   .replaceAll('"','&quot;').replaceAll("'",'&#039;');
 const linkify = (s)=> s.replace(/https?:\/\/\S+/g,(url)=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
 
-/* ---------------- Helpers: name normalization + GM detection ---------------- */
-const norm = (name)=> String(name||'')
-  .trim()
-  .replace(/^@+/, '')
-  .replace(/\s+/g,' ')
-  .toLowerCase();
-
-function updateIsGM(gmNameFromServer){
-  const gmFromBadge = $('gmBadge')?.textContent?.replace(/^GM:\s*/,'') || '';
-  const gm = gmNameFromServer || CAMPAIGN.gm || gmFromBadge;
-  const A = norm(CURRENT_USER);
-  const B = norm(gm);
-  IS_GM = !!A && !!B && A === B;
+/* ---------------- Utils ---------------- */
+const norm = (name) => (name||'').toString().trim().replace(/^@/,'').toLowerCase();
+function updateIsGM(gmName){
+  const gm = norm(gmName || CAMPAIGN.gm || bySel('#gmBadge')?.textContent?.replace(/^GM:\s*/, '') || '');
+  IS_GM = !!CURRENT_USER && norm(CURRENT_USER) === gm && !!gm;
 }
 
 /* ---------------- Campaign Picker (GM only UI) ---------------- */
@@ -71,7 +64,10 @@ async function injectCampaignPicker() {
       <strong>Load Campaign</strong>
       <select id="campaignSelect" class="w-30"><option>Loading…</option></select>
       <button id="campaignLoadBtn" class="btn">Load</button>
-      <label class="toggle" title="If your server doesn't send a start event, use this."><input id="unlockChoices" type="checkbox" /> Unlock Choices (GM override)</label>
+      <label class="toggle" style="margin-left:auto">
+        <input type="checkbox" id="unlockChoicesChk">
+        <span class="small">Unlock Choices (GM override)</span>
+      </label>
     </div>
     <div id="campaignPreview" class="small muted" style="margin-top:6px;"></div>
   `;
@@ -94,24 +90,29 @@ async function injectCampaignPicker() {
 
     $('campaignLoadBtn').addEventListener('click', ()=>{
       log('GM: loading campaign…', 'sys');
-      socket.emit('campaign_load', { key: $('campaignSelect').value });
-    });
-
-    // GM override: unlock choices irrespective of server flag
-    $('unlockChoices').addEventListener('change', (e)=>{
-      if (e.target.checked && IS_GM) {
-        CAMPAIGN.started = true;
-        log('GM override: Choices unlocked.', 'sys');
-      } else if (!e.target.checked && IS_GM) {
-        CAMPAIGN.started = false;
-        log('GM override: Choices locked.', 'sys');
-      }
-      // re-render with new started state
-      socket.emit('campaign_get');
+      socket.emit('campaign_load', { key: sel.value });
     });
   } catch (e) {
     console.error(e);
   }
+
+  // GM override checkbox
+  const chk = $('unlockChoicesChk');
+  chk.checked = LOCAL_OVERRIDE_STARTED || CAMPAIGN.started;
+  chk.addEventListener('change', ()=>{
+    if (!IS_GM) { chk.checked = false; return; }
+    LOCAL_OVERRIDE_STARTED = chk.checked;
+    if (chk.checked) {
+      CAMPAIGN.started = true;
+      log('GM override: choices unlocked locally.', 'sys');
+    } else {
+      // Only re-lock if server also says not started
+      if (!CAMPAIGN._serverStarted) CAMPAIGN.started = false;
+      log('GM override disabled.', 'sys');
+    }
+    renderCampaignState(CAMPAIGN);
+    gmControlsBar();
+  });
 }
 
 /* ---------------- Tiny UI Kit: modal ---------------- */
@@ -343,7 +344,7 @@ function drawMap(){
 
   // Guard tiles
   if (!Array.isArray(MAP.tiles) || MAP.tiles.length !== (MAP.h||0)) {
-    mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+    if (mctx) mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
     return;
   }
 
@@ -370,19 +371,21 @@ function drawMap(){
   });
 
   // Mini-map
-  mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
-  const sx = miniCanvas.width / (MAP.w || 1), sy = miniCanvas.height / (MAP.h || 1);
-  for (let y=0;y<MAP.h;y++){
-    for (let x=0;x<MAP.w;x++){
-      const isWall = ((MAP.tiles[y] || [])[x] === 1);
-      mctx.fillStyle = isWall ? '#2b303b' : '#f9fafb';
-      mctx.fillRect(x*sx, y*sy, sx, sy);
+  if (mctx) {
+    mctx.clearRect(0,0,miniCanvas.width,miniCanvas.height);
+    const sx = miniCanvas.width / (MAP.w || 1), sy = miniCanvas.height / (MAP.h || 1);
+    for (let y=0;y<MAP.h;y++){
+      for (let x=0;x<MAP.w;x++){
+        const isWall = ((MAP.tiles[y] || [])[x] === 1);
+        mctx.fillStyle = isWall ? '#2b303b' : '#f9fafb';
+        mctx.fillRect(x*sx, y*sy, sx, sy);
+      }
     }
+    Object.values(MAP.tokens||{}).forEach(t=>{
+      mctx.fillStyle = t.color || '#222';
+      mctx.fillRect(t.x*sx, t.y*sy, sx, sy);
+    });
   }
-  Object.values(MAP.tokens||{}).forEach(t=>{
-    mctx.fillStyle = t.color || '#222';
-    mctx.fillRect(t.x*sx, t.y*sy, sx, sy);
-  });
 }
 
 let selectedTokenId = null;
@@ -486,18 +489,15 @@ function gmControlsBar() {
     const b = makeBtn('Start Campaign', { primary:true });
     b.addEventListener('click', ()=> {
       log('GM: starting campaign…', 'sys');
-
-      // Optimistic UI — unlock GM choices immediately
+      LOCAL_OVERRIDE_STARTED = true;
       CAMPAIGN.started = true;
+      renderCampaignState(CAMPAIGN); // enable choice buttons for GM immediately
       gmControlsBar();
-      renderCampaignState(CAMPAIGN); // enable choice buttons
-
-      // Try multiple server event contracts
       socket.emit('campaign_start');
-      socket.emit('campaign_begin');
-      socket.emit('start_campaign');
-      socket.emit('chat', { text: '/startcampaign' });
-      socket.emit('state_set', { settings: { campaignStarted: true } }); // some servers use a settings flag
+      // Also emit a settings hint used by some servers
+      socket.emit('settings_update', { campaignStarted: true });
+      // Flip the override checkbox if present
+      const chk = $('unlockChoicesChk'); if (chk) chk.checked = true;
     });
     bar.appendChild(b);
   }
@@ -512,7 +512,14 @@ function gmControlsBar() {
 }
 
 function renderCampaignState(c){
+  // Keep a copy of what server last said about started-ness
+  if (typeof c?.started === 'boolean') CAMPAIGN._serverStarted = c.started;
+
+  // Merge campaign data
   CAMPAIGN = { ...CAMPAIGN, ...c };
+
+  // Apply local override if GM wants it
+  if (LOCAL_OVERRIDE_STARTED && IS_GM) CAMPAIGN.started = true;
 
   const meta = $('campMeta'), sceneEl = $('campScene'), choicesWrap = $('campChoices');
   if (!meta || !sceneEl || !choicesWrap) return;
@@ -531,15 +538,17 @@ function renderCampaignState(c){
 
   (current?.choices || []).forEach(ch=>{
     const btn = makeBtn(ch.text);
-    if ((IS_GM && CAMPAIGN.started) || (IS_GM && $('unlockChoices')?.checked)) {
+    if (IS_GM && CAMPAIGN.started) {
       btn.addEventListener('click', ()=> socket.emit('campaign_choice_request', { choiceId: ch.id }));
       btn.disabled = false;
       btn.title = '';
       btn.style.cursor = 'pointer';
+      btn.style.pointerEvents = 'auto';
     } else {
       btn.disabled = true;
       btn.title = CAMPAIGN.started ? 'Only the GM can choose' : 'Campaign not started yet';
       btn.style.cursor = 'not-allowed';
+      btn.style.pointerEvents = 'none';
     }
     choicesWrap.appendChild(btn);
   });
@@ -666,7 +675,7 @@ socket.on('connect_error', (err)=>{
 
 socket.on('identified', ({ username })=> {
   CURRENT_USER = username;
-  updateIsGM();
+  updateIsGM(); // may resolve once gmBadge exists too
   log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys');
 });
 
@@ -677,7 +686,10 @@ socket.on('joined', ({ lobby, history, gm, settings })=>{
   (history?.rolls||[]).forEach(r=>renderRoll(r));
   if ($('gmBadge')) $('gmBadge').textContent = `GM: ${gm || '—'}`;
 
-  CAMPAIGN.started = !!(settings && settings.campaignStarted);
+  // Respect current started state from server
+  CAMPAIGN._serverStarted = !!(settings && settings.campaignStarted);
+  CAMPAIGN.started = (LOCAL_OVERRIDE_STARTED && IS_GM) ? true : CAMPAIGN._serverStarted;
+
   CAMPAIGN.gm = gm || CAMPAIGN.gm;
   updateIsGM(gm);
 
@@ -701,9 +713,16 @@ socket.on('state', (state)=>{
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
 
+  // Sync started flag from server, but honor local override if GM
   if (state.settings && typeof state.settings.campaignStarted === 'boolean') {
-    CAMPAIGN.started = state.settings.campaignStarted;
+    CAMPAIGN._serverStarted = state.settings.campaignStarted;
   }
+  if (!LOCAL_OVERRIDE_STARTED || !IS_GM) {
+    CAMPAIGN.started = !!CAMPAIGN._serverStarted;
+  } else {
+    CAMPAIGN.started = true;
+  }
+
   if (state.gm) CAMPAIGN.gm = state.gm;
   updateIsGM(state.gm);
 
@@ -721,27 +740,31 @@ socket.on('map_ping', ({x,y})=>{
 });
 
 /* Campaign events + flows */
+function handleStarted(){
+  CAMPAIGN._serverStarted = true;
+  CAMPAIGN.started = true;
+  const chk = $('unlockChoicesChk'); if (chk) chk.checked = true;
+  log('Campaign started!', 'sys');
+  socket.emit('campaign_get'); // refresh full state
+}
 socket.on('campaign_state', (c)=> {
   if (typeof c?.gm === 'string') CAMPAIGN.gm = c.gm;
   updateIsGM(c?.gm);
+  // some servers include started here
+  if (typeof c?.started === 'boolean') {
+    CAMPAIGN._serverStarted = c.started;
+    if (!LOCAL_OVERRIDE_STARTED || !IS_GM) CAMPAIGN.started = c.started;
+  }
   renderCampaignState(c);
 });
-socket.on('campaign_started', ({ sceneId })=>{
-  CAMPAIGN.started = true;
-  log('Campaign started! (campaign_started)', 'sys');
-  socket.emit('campaign_get');
-});
-socket.on('campaign_begin', ({ sceneId })=>{
-  CAMPAIGN.started = true;
-  log('Campaign started! (campaign_begin)', 'sys');
-  socket.emit('campaign_get');
-});
-// Some servers just flip a generic state flag:
-socket.on('settings_updated', ({ settings })=>{
-  if (settings && typeof settings.campaignStarted === 'boolean') {
-    CAMPAIGN.started = settings.campaignStarted;
-    log(`Server settings: campaignStarted=${CAMPAIGN.started}`, 'sys');
-    socket.emit('campaign_get');
+socket.on('campaign_started', ({ sceneId })=> handleStarted());
+socket.on('campaign_begin', ({ sceneId })=> handleStarted());
+socket.on('settings_updated', (settings)=>{
+  if (typeof settings?.campaignStarted === 'boolean') {
+    CAMPAIGN._serverStarted = settings.campaignStarted;
+    if (!LOCAL_OVERRIDE_STARTED || !IS_GM) CAMPAIGN.started = settings.campaignStarted;
+    renderCampaignState(CAMPAIGN);
+    gmControlsBar();
   }
 });
 socket.on('character_required', ({ reason })=>{
