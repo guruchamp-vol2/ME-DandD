@@ -124,7 +124,7 @@ html, body {
 .panel-body{ display:none; padding: 14px; }
 .panel-body.active{ display:block; }
 
-/* Kill "mystery gap": prevent first-child top-margin collapse in panels */
+/* Kill â€œmystery gapâ€: prevent first-child top-margin collapse in panels */
 .panel-body > :first-child{ margin-top: 0 !important; }
 .card > :first-child{ margin-top: 0; }
 .section-title{ margin: 0 0 8px; font-family: var(--rune); color: var(--accent); }
@@ -205,10 +205,8 @@ code, .table code{
 .grid-4{ grid-template-columns: repeat(4,minmax(0,1fr)); gap:10px; }
 .grid-6{ grid-template-columns: repeat(6,minmax(0,1fr)); gap:10px; }
 .cols-1{ grid-template-columns: 1fr; }
-/* fixed: valid class name to match HTML */
 .cols-2{ grid-template-columns: 1.2fr .8fr; }
 .sm-grid-3{ grid-template-columns: repeat(3,minmax(0,1fr)); }
-/* fixed: valid media query selectors */
 @media (min-width: 980px){ .cols-2{ grid-template-columns: 1.2fr .8fr; } }
 @media (max-width: 680px){ .grid-6, .sm-grid-3{ grid-template-columns: repeat(2,minmax(0,1fr)); } }
 
