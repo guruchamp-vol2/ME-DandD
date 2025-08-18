@@ -1,8 +1,8 @@
-/* === D&D Lobbies — FINAL (popup unclipped + sticky gap fix) ==================
-   - Unclips native <select>/<input type=number> popups (Chrome/Safari/Firefox)
-   - No transforms on inputs (prevents clipping)
-   - Tabs sit under content; inputs sit above tabs
-   - Ancestors keep overflow:visible to avoid clipping
+/* === D&D Lobbies — FINAL POPUP FIX =========================================
+   Fixes native <select>/<input type=number> popups being clipped:
+   - All ancestors use overflow: visible (no clipping)
+   - Tabs z-index lowered; content sits above tabs
+   - Inputs/selects given a very high local z-index (no transforms)
 ============================================================================= */
 
 :root{
@@ -26,7 +26,7 @@ html,body{height:100%}
 html,body{
   margin:0; color:var(--ink); font-family:var(--body);
   background:radial-gradient(1400px 900px at 30% -10%, #fffbea 0%, var(--bg-1) 45%, var(--bg-2) 78%, var(--bg-3) 100%);
-  overflow:visible; /* allow native popups to overflow */
+  overflow: visible;              /* ⬅ allow native popups to overflow */
 }
 
 /* App bar */
@@ -43,18 +43,19 @@ html,body{
 .appbar .subtitle{opacity:.85; font-size:.9rem}
 .appbar-actions{display:flex; align-items:center; gap:8px}
 
-/* Layout (unclipped) */
+/* Layout */
 .layout{
   max-width:1200px; margin:0 auto; padding:16px;
   display:grid; gap:16px; grid-template-columns:300px 1fr;
-  overflow:visible;
+  overflow: visible;               /* ⬅ important */
 }
 @media (max-width:980px){.layout{grid-template-columns:1fr}}
+
 .panel.glass,.card,.main{
   background:var(--surface);
   border:1px solid rgba(50,29,15,.08);
   border-radius:14px; box-shadow:var(--shadow);
-  overflow:visible; /* critical for popup overflow */
+  overflow: visible;               /* ⬅ important */
 }
 .panel.glass,.card{padding:12px}
 .main{padding:0}
@@ -66,9 +67,9 @@ html,body{
 .userbar{display:flex; flex-wrap:wrap; gap:6px}
 .pill,.chip{background:#f7e1e1; color:#4e1515; border:1px solid #c98787; border-radius:999px; padding:3px 10px; font-size:12px}
 
-/* Tabs (sticky under appbar) — LOWER z so form popups render above */
+/* Tabs (sticky) — LOWER z so popups render above */
 .tabs{
-  position:sticky; top:var(--appbar-h); z-index:1;
+  position:sticky; top:var(--appbar-h); z-index: 0; /* ⬅ lowered */
   display:flex; gap:10px; padding:10px 12px;
   background:linear-gradient(180deg,var(--surface-2),#fff1db);
   border-bottom:1px solid #e2d5b4; box-shadow:0 6px 20px rgba(0,0,0,.08);
@@ -80,7 +81,8 @@ html,body{
 /* Panels */
 .panel-body{
   display:none; padding:14px;
-  overflow:visible; position:relative; z-index:2; /* sits above .tabs now */
+  position: relative; z-index: 1;  /* ⬅ content over tabs */
+  overflow: visible;               /* ⬅ allow popups to overflow */
 }
 .panel-body.active{display:block}
 .panel-body > :first-child{margin-top:0 !important}
@@ -96,18 +98,18 @@ html,body{
 .muted{color:var(--muted)}
 .divider{height:1px; background:#dfd2b3; margin:10px 0}
 
-/* Inputs — RAISE z-index; NO transforms/will-change (prevents clipping) */
-.field{display:grid; gap:4px; position:relative; z-index:10; overflow:visible;}
+/* Inputs — NO transforms; HIGH local z-index to beat sticky tabs */
+.field{display:grid; gap:4px; position:relative; z-index: 2; overflow: visible;}
 .field > span{font-size:.9rem; color:var(--muted)}
 input,select,textarea{
   background:#fffaf2; border:1px solid #c9b180; border-radius:12px;
   padding:10px 12px; box-shadow:inset 0 1px 0 rgba(255,255,255,.7);
-  font-size:1rem; position:relative; z-index:1000;
+  font-size:1rem; position: relative; z-index: 9999; /* ⬅ key */
 }
-/* DO NOT add translateZ(0) / will-change here — those CAUSE clipping */
+/* never add will-change/transform to form controls */
 input:focus,select:focus,textarea:focus{
   outline:none; box-shadow:var(--ring), inset 0 1px 0 rgba(255,255,255,.8);
-  border-color:#b89255; z-index:2000;
+  border-color:#b89255; z-index: 10000;        /* ⬅ higher while open */
 }
 
 input.w-10{width:88px}.w-20{width:160px}.w-30{width:220px}
@@ -170,7 +172,7 @@ canvas.mini{border:1px solid #d2b48c; background:#fffdf4; border-radius:10px}
 .footer{padding:16px; text-align:center; color:var(--muted)}
 
 /* Modals */
-#modal-layer{animation:modalFade .12s ease-out}
+#modal-layer{position:fixed; inset:0; z-index: 99999; animation:modalFade .12s ease-out}
 #modal-layer > div{background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow)}
 #modal-layer h3{font-family:var(--rune); color:var(--accent)}
 @keyframes modalFade{from{opacity:0} to{opacity:1}}
@@ -192,5 +194,5 @@ canvas.mini{border:1px solid #d2b48c; background:#fffdf4; border-radius:10px}
 /* Clickable tabs */
 .tab-btn{cursor:pointer}
 
-/* Global unclip inside main content */
+/* Safety net: unclip everything in main content */
 .main .panel-body, .main .panel-body * , .main .card, .main .card * { overflow:visible !important; }
