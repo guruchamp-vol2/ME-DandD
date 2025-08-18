@@ -49,7 +49,7 @@ html,body{
 @media (max-width:980px){.layout{grid-template-columns:1fr}}
 .panel.glass,.card,.main{background:var(--surface); border:1px solid rgba(50,29,15,.08); border-radius:14px; box-shadow:var(--shadow)}
 .panel.glass,.card{padding:12px}
-.main{padding:0; overflow:hidden}
+.main{padding:0; overflow:visible}
 
 /* Sidebar */
 .panel-title{margin:0 0 8px; font-family:var(--rune); color:var(--accent)}
@@ -173,3 +173,5 @@ canvas.mini{border:1px solid #d2b48c; background:#fffdf4; border-radius:10px}
 
 /* Make tabs obviously clickable */
 .tab-btn{cursor:pointer}
+/* --- Anti-cutoff override (Chrome sticky inside rounded container) --- */
+.main{ overflow: visible !important; min-height: 0 !important; min-width: 0 !important; }
