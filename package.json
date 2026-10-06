@@ -5,7 +5,8 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -15,5 +16,8 @@
     "mongodb": "^6.8.0",
     "rate-limiter-flexible": "^5.0.0",
     "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }

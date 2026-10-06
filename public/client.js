@@ -1,12 +1,8 @@
-/* D&D Lobbies — client.js (GM override + resilient start sync)
-   - Robust GM detection (case/space/@ safe)
-   - Optimistic Start + LOCAL OVERRIDE so server can't immediately flip it back
-   - Listens for multiple server events: campaign_started, campaign_begin, settings_updated
-   - Adds a GM-only "Unlock Choices (override)" toggle in the Campaign area
-   Requires: <script src="/socket.io/socket.io.js"></script> BEFORE this file.
-*/
+/* Realtime D&D client. Campaign permissions and start state are enforced by the server. */
 
-const socket = io();
+let resumeToken='';try{resumeToken=sessionStorage.getItem('dndResumeToken') || '';}catch{}
+const socket=io({auth:{resumeToken}});
+let JOINED_LOBBY=null;
 
 /* ---------------- Global state ---------------- */
 let CURRENT_USER = null; // set on 'identified'
@@ -28,7 +24,7 @@ const log = (html, cls='') => {
   const el = document.createElement('div');
   el.className = cls; el.innerHTML = html;
   const logEl = $('log'); if (!logEl) return;
-  logEl.appendChild(el); logEl.scrollTop = logEl.scrollHeight;
+  logEl.appendChild(el);while(logEl.children.length>300)logEl.firstChild.remove();logEl.scrollTop=logEl.scrollHeight;
 };
 
 const switchTab = (id) => {
@@ -47,6 +43,8 @@ const norm = (name) => (name||'').toString().trim().replace(/^@/,'').toLowerCase
 function updateIsGM(gmName){
   const gm = norm(gmName || CAMPAIGN.gm || bySel('#gmBadge')?.textContent?.replace(/^GM:\s*/, '') || '');
   IS_GM = !!CURRENT_USER && norm(CURRENT_USER) === gm && !!gm;
+  if($('gmTools'))$('gmTools').style.display=IS_GM?'block':'none';
+  const picker=bySel('[data-campaign-picker]');if(picker)picker.hidden=!IS_GM;
 }
 
 /* ---------------- Campaign Picker (GM only UI) ---------------- */
@@ -64,10 +62,7 @@ async function injectCampaignPicker() {
       <strong>Load Campaign</strong>
       <select id="campaignSelect" class="w-30"><option>Loading…</option></select>
       <button id="campaignLoadBtn" class="btn">Load</button>
-      <label class="toggle" style="margin-left:auto">
-        <input type="checkbox" id="unlockChoicesChk">
-        <span class="small">Unlock Choices (GM override)</span>
-      </label>
+
     </div>
     <div id="campaignPreview" class="small muted" style="margin-top:6px;"></div>
   `;
@@ -78,7 +73,7 @@ async function injectCampaignPicker() {
     const res = await fetch('/campaigns', { headers:{ 'accept':'application/json' } });
     const list = await res.json();
     const sel = $('campaignSelect');
-    sel.innerHTML = list.map(c => `<option value="${c.key}">${escapeHtml(c.title)}</option>`).join('') || '<option>(none found)</option>';
+    sel.innerHTML = list.map(c => `<option value="${escapeHtml(c.key)}">${escapeHtml(c.title)}</option>`).join('') || '<option>(none found)</option>';
 
     const preview = $('campaignPreview');
     const renderPrev = () => {
@@ -96,23 +91,7 @@ async function injectCampaignPicker() {
     console.error(e);
   }
 
-  // GM override checkbox
-  const chk = $('unlockChoicesChk');
-  chk.checked = LOCAL_OVERRIDE_STARTED || CAMPAIGN.started;
-  chk.addEventListener('change', ()=>{
-    if (!IS_GM) { chk.checked = false; return; }
-    LOCAL_OVERRIDE_STARTED = chk.checked;
-    if (chk.checked) {
-      CAMPAIGN.started = true;
-      log('GM override: choices unlocked locally.', 'sys');
-    } else {
-      // Only re-lock if server also says not started
-      if (!CAMPAIGN._serverStarted) CAMPAIGN.started = false;
-      log('GM override disabled.', 'sys');
-    }
-    renderCampaignState(CAMPAIGN);
-    gmControlsBar();
-  });
+
 }
 
 /* ---------------- Tiny UI Kit: modal ---------------- */
@@ -267,6 +246,7 @@ $('c_race')?.addEventListener('change', ()=>{
 });
 
 $('saveChar')?.addEventListener('click', ()=>{
+  if(totalCost()>27 && !IS_GM){log('Point-buy exceeds 27 points.','sys');return;}
   const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt($('ab_'+id)?.value||8,10)]));
   const sheet = {
     name: $('c_name')?.value.trim(),
@@ -312,7 +292,7 @@ function renderChars(charsObj){
       if ($('c_race')) $('c_race').value = c.race || 'Human';
       if ($('c_level')) $('c_level').value = c.level || 1;
       if ($('c_ac')) $('c_ac').value = c.ac || 10;
-      if ($('c_hp')) $('c_hp').value = c.hp || 10;
+      if ($('c_hp')) $('c_hp').value = c.hp ?? 10;
       if ($('c_maxHp')) $('c_maxHp').value = c.maxHp || 10;
       AB_IDS.forEach(id => { const el = $('ab_'+id); if (el) el.value = (c.abilities?.[id] ?? 8); });
       if ($('c_speed')) $('c_speed').value = c.speed || 30;
@@ -402,19 +382,20 @@ function tileFromMouse(e){
 }
 
 let dragging = false;
-mapCanvas?.addEventListener('mousedown', (e)=>{
+mapCanvas?.addEventListener('pointerdown', (e)=>{
   const {x,y} = tileFromMouse(e);
   if ($('drawWalls')?.checked){
     const val = $('eraseWalls')?.checked ? 0 : 1;
     socket.emit('map_set', { x, y, val });
     dragging = true;
   } else {
-    const id = pickTokenAt(e.offsetX, e.offsetY);
+    const point=tileFromMouse(e);
+    const id=pickTokenAt(point.mx,point.my);
     selectedTokenId = id;
     dragging = !!id;
   }
 });
-mapCanvas?.addEventListener('mousemove', (e)=>{
+mapCanvas?.addEventListener('pointermove', (e)=>{
   if (!dragging) return;
   const {x,y} = tileFromMouse(e);
   if ($('drawWalls')?.checked){
@@ -424,7 +405,7 @@ mapCanvas?.addEventListener('mousemove', (e)=>{
     socket.emit('token_move', { id: selectedTokenId, x, y });
   }
 });
-window.addEventListener('mouseup', ()=> { dragging = false; });
+window.addEventListener('pointerup', ()=> { dragging = false; });
 
 $('gmSetMap')?.addEventListener('click', ()=> socket.emit('map_init', { w: Number($('mapW')?.value||20), h: Number($('mapH')?.value||20) }));
 $('gmClear')?.addEventListener('click', ()=> socket.emit('map_clear'));
@@ -467,7 +448,7 @@ function renderEncounter(enc){
     const tr = document.createElement('tr');
     const isTurn = enc.active && idx === (enc.turnIndex||0);
     tr.innerHTML = `<td>${idx+1}${isTurn?' ▶':''}</td><td>${escapeHtml(o.name)}</td><td>${o.init}</td>`;
-    if (isTurn) tr.style.background='#fff8dc';
+    if(isTurn)tr.classList.add('current-turn');
     tbody.appendChild(tr);
   });
 }
@@ -489,13 +470,9 @@ function gmControlsBar() {
     const b = makeBtn('Start Campaign', { primary:true });
     b.addEventListener('click', ()=> {
       log('GM: starting campaign…', 'sys');
-      LOCAL_OVERRIDE_STARTED = true;
-      CAMPAIGN.started = true;
-      renderCampaignState(CAMPAIGN); // enable choice buttons for GM immediately
-      gmControlsBar();
+      b.disabled=true;
       socket.emit('campaign_start');
-      // Also emit a settings hint used by some servers
-      socket.emit('settings_update', { campaignStarted: true });
+
       // Flip the override checkbox if present
       const chk = $('unlockChoicesChk'); if (chk) chk.checked = true;
     });
@@ -518,8 +495,7 @@ function renderCampaignState(c){
   // Merge campaign data
   CAMPAIGN = { ...CAMPAIGN, ...c };
 
-  // Apply local override if GM wants it
-  if (LOCAL_OVERRIDE_STARTED && IS_GM) CAMPAIGN.started = true;
+
 
   const meta = $('campMeta'), sceneEl = $('campScene'), choicesWrap = $('campChoices');
   if (!meta || !sceneEl || !choicesWrap) return;
@@ -563,7 +539,9 @@ function renderCampaignState(c){
   if (IS_GM) injectCampaignPicker();
 }
 
+let campaignInputsWired=false;
 function wireCampaignInputs(){
+  if(campaignInputsWired)return;campaignInputsWired=true;
   $('addNote')?.addEventListener('click', ()=>{
     const t = $('noteText')?.value.trim(); if (!t) return;
     socket.emit('campaign_note_add', { text: t });
@@ -637,6 +615,7 @@ function openCharacterPopup(prefillName=''){
 
   const save = makeBtn('Save Character', { primary:true });
   save.addEventListener('click', ()=>{
+    if(pcCost()>27){pcPoints.textContent='Point-buy exceeds 27 points.';return;}
     const abilities = Object.fromEntries(AB_IDS.map(id => [id, parseInt(body.querySelector('#pc_'+id)?.value||8,10)]));
     const sheet = {
       name: body.querySelector('#pc_name')?.value.trim() || $('name')?.value.trim() || 'Hero',
@@ -656,8 +635,7 @@ function openCharacterPopup(prefillName=''){
 /* ---------------- Consent Modal ---------------- */
 function openConsentModal({ text, requestedBy }){
   const body = document.createElement('div');
-  body.innerHTML = `<p>${escapeHtml(requestedBy || 'GM')} proposes: <strong>${escapeHtml(text)}</strong></p>
-  <p class="small muted">Everyone must accept (or the GM can force after ~30s).</p>`;
+  body.innerHTML = `<p>${escapeHtml(requestedBy || 'GM')} proposes: <strong>${escapeHtml(text)}</strong></p><p class="small muted">Everyone must accept, or the GM can force the choice.</p>`;
   const cancel = makeBtn('Not Yet', { ghost:true });
   cancel.addEventListener('click', hideModal);
   const ok = makeBtn("I'm OK with this", { primary:true });
@@ -679,7 +657,10 @@ socket.on('identified', ({ username })=> {
   log(`You are <strong>${escapeHtml(username)}</strong>.`, 'sys');
 });
 
-socket.on('joined', ({ lobby, history, gm, settings })=>{
+socket.on('joined', ({ lobby, username, history, gm, settings })=>{
+  JOINED_LOBBY=lobby;if($('lobby'))$('lobby').value=lobby;CURRENT_USER=username || CURRENT_USER;LOCAL_OVERRIDE_STARTED=false;
+  if($('name'))$('name').value=CURRENT_USER;
+  if($('c_name') && !$('c_name').value)$('c_name').value=CURRENT_USER;
   if ($('log')) $('log').innerHTML = '';
   log(`Joined lobby <strong>${escapeHtml(lobby)}</strong>.`, 'sys');
   (history?.messages||[]).forEach(m=>renderChat(m));
@@ -713,7 +694,9 @@ socket.on('state', (state)=>{
   renderChars(state.characters || {});
   renderEncounter(state.encounter || {active:false, order:[], turnIndex:0});
 
-  // Sync started flag from server, but honor local override if GM
+  if(CAMPAIGN.pendingChoice && !state.pendingChoice)hideModal();
+  CAMPAIGN.pendingChoice=state.pendingChoice;
+  // Sync started flag from server
   if (state.settings && typeof state.settings.campaignStarted === 'boolean') {
     CAMPAIGN._serverStarted = state.settings.campaignStarted;
   }
@@ -768,7 +751,7 @@ socket.on('settings_updated', (settings)=>{
   }
 });
 socket.on('character_required', ({ reason })=>{
-  openCharacterPopup($('name')?.value.trim() || 'Hero');
+  openCharacterPopup(CURRENT_USER || 'Hero');
 });
 socket.on('campaign_choice_requested', (payload)=>{
   CAMPAIGN.pendingChoice = payload?.choiceId || true;
@@ -797,4 +780,22 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab===id));
     document.querySelectorAll('.panel-body').forEach(p => p.classList.toggle('active', p.id===id));
   }));
+});
+
+const connection=$('connectionStatus');
+socket.on('session',({resumeToken})=>{socket.auth.resumeToken=resumeToken;try{sessionStorage.setItem('dndResumeToken',resumeToken);}catch{}});
+socket.on('resume_lobby',({lobby,name})=>{socket.emit('identify',{name});socket.emit('join_lobby',{lobby});});
+socket.on('connect',()=>{if(connection)connection.textContent='Connected';});
+socket.on('disconnect',()=>{if(connection)connection.textContent='Reconnecting…';dragging=false;});
+socket.on('left_lobby',()=>{JOINED_LOBBY=null;IS_GM=false;CAMPAIGN={started:false,pendingChoice:null};$('users').replaceChildren();$('gmBadge').textContent='GM: —';updateIsGM('');hideModal();});
+$('leaveBtn')?.addEventListener('click',()=>socket.emit('leave_lobby'));
+$('exportCampaign')?.addEventListener('click',()=>socket.emit('campaign_export'));
+socket.on('campaign_exported',campaign=>{
+  const url=URL.createObjectURL(new Blob([JSON.stringify(campaign,null,2)],{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download='campaign.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+$('importCampaign')?.addEventListener('change',async e=>{
+  const file=e.target.files[0];if(!file)return;
+  try{if(file.size>400000)throw new Error('Campaign file is too large.');socket.emit('campaign_import',{campaign:JSON.parse(await file.text())});}catch(error){log(escapeHtml(error.message),'sys');}
+  e.target.value='';
 });

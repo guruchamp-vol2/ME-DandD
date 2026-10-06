@@ -2,11 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>D&D Lobbies</title>
+    <title>Ember Table · Your next adventure</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- Styles -->
     <link rel="stylesheet" href="/styles.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Crimson+Text:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 
   </head>
   <body>
@@ -15,8 +14,8 @@
       <div class="brand">
         <div class="d20">20</div>
         <div>
-          <div class="title">D&D Lobbies</div>
-          <div class="subtitle">chat • dice • characters • mini-map • encounter • campaign</div>
+          <div class="title">Ember Table</div>
+          <div class="subtitle">A shared table for unforgettable adventures</div>
         </div>
       </div>
 
@@ -29,6 +28,7 @@
       </div>
     </header>
 
+    <section class="session-banner"><div><p class="eyebrow">GATHER YOUR PARTY</p><h1>Your story starts at the table.</h1><p>Build a campaign, explore together, and let the dice decide.</p></div><div class="session-stats"><div><span id="sessionPlayers">0</span><small>PLAYERS</small></div><div><span id="sessionRound">—</span><small>ROUND</small></div><div><span id="sessionScene">—</span><small>CURRENT SCENE</small></div></div></section>
     <main class="layout">
       <!-- Sidebar: Lobby + Users -->
       <aside class="panel glass">
@@ -43,9 +43,10 @@
             <input id="lobby" maxlength="40" placeholder="e.g. tavern" />
           </label>
           <div class="hstack gap-8">
-            <input id="password" class="grow" placeholder="(optional) password" />
+            <input id="password" type="password" maxlength="128" class="grow" placeholder="(optional) password" />
             <button id="joinBtn" class="btn primary">Join</button>
           </div>
+          <p id="connectionStatus" role="status">Connecting…</p><button id="leaveBtn" class="btn ghost">Leave Lobby</button>
           <button id="listBtn" class="btn ghost">List Lobbies</button>
           <ul id="lobbies" class="list"></ul>
 
@@ -68,6 +69,9 @@
           <button class="tab-btn" data-tab="mapTab">Map</button>
           <button class="tab-btn" data-tab="encTab">Encounter</button>
           <button class="tab-btn" data-tab="campTab">Campaign</button>
+          <button class="tab-btn" data-tab="partyTab">Party</button>
+          <button class="tab-btn" data-tab="journalTab">Journal</button>
+          <button class="tab-btn" data-tab="gmDeskTab" data-gm-only>GM desk</button>
         </nav>
 
         <!-- Chat -->
@@ -91,6 +95,7 @@
               <button id="rollBtn" class="btn primary xl">Roll</button>
             </div>
           </div>
+          <div class="dice-tray" id="quickDice"></div><h3>Roll history</h3><div id="diceResults" class="dice-results" role="log"></div>
           <div class="hint">Keep highest/lowest: <code>4d6kh3</code> / <code>4d6kl3</code>. Advantage: <code>adv</code>.</div>
         </div>
 
@@ -189,10 +194,12 @@
         <!-- Encounter -->
         <div id="encTab" class="panel-body">
           <div class="hstack wrap gap-8">
+            <button id="autoEncounter" class="btn primary" data-gm-only>Roll initiative for all</button><button id="endMyTurn" class="btn">End current turn</button>
             <button id="encStart" class="btn ghost">Start Encounter (GM)</button>
             <button id="encNext" class="btn ghost">Next Turn (GM)</button>
             <button id="encEnd" class="btn ghost">End Encounter (GM)</button>
           </div>
+          <div class="card combat-actions"><h3>Attack action</h3><form id="attackForm" class="grid-4 gap-8"><label class="field"><span>Attacker</span><select id="attackActor"></select></label><label class="field"><span>Target</span><select id="attackTarget"></select></label><label class="field"><span>Attack ability</span><select id="attackAbility"><option>STR</option><option>DEX</option></select></label><label class="field"><span>Damage dice</span><input id="attackDamage" value="1d6+2" maxlength="30"></label><button class="btn primary">Roll attack</button></form><p class="muted">One attack per turn. Natural 20 hits automatically; natural 1 misses. Critical hits roll extra damage dice.</p><div id="combatHistory" class="combat-history" role="log"></div></div>
           <div class="grid-3 gap-12 top-pad">
             <div class="card">
               <h4 class="muted">Initiative Order</h4>
@@ -214,6 +221,9 @@
           </div>
         </div>
 
+        <div id="partyTab" class="panel-body"><div class="section-heading"><div><p class="eyebrow">YOUR COMPANIONS</p><h2>Party & inventories</h2></div><span class="chip">Changes sync with everyone</span></div><div id="partyCards" class="party-grid"></div><div class="card"><h3>Pack an item</h3><form id="inventoryForm" class="grid-3 gap-8"><label class="field"><span>Character</span><select id="inventoryOwner"></select></label><label class="field"><span>Item name</span><input id="itemName" maxlength="80" required placeholder="Healing potion"></label><label class="field"><span>Quantity</span><input id="itemQuantity" type="number" min="1" max="999" value="1"></label><label class="field"><span>Weight per item</span><input id="itemWeight" type="number" min="0" max="999" value="0"></label><label class="field"><span>Notes</span><input id="itemNotes" maxlength="300"></label><button class="btn primary">Add to inventory</button></form></div></div>
+        <div id="journalTab" class="panel-body"><p class="eyebrow">THE STORY SO FAR</p><h2>Session journal</h2><p class="muted">Shared discoveries, decisions, and memories for the whole party.</p><div id="sessionJournal" class="journal-feed"></div><form id="journalForm" class="card"><label class="field"><span>New entry</span><textarea id="journalEntry" rows="4" maxlength="2000" required placeholder="Today we discovered…"></textarea></label><button class="btn primary">Add journal entry</button></form></div>
+        <div id="gmDeskTab" class="panel-body"><p class="eyebrow">BEHIND THE SCREEN</p><h2>Game master's desk</h2><div class="grid-2 gap-12"><div class="card"><h3>Private GM notes</h3><p class="muted">These notes are sent only to the current GM.</p><textarea id="privateNotes" rows="10" maxlength="12000" placeholder="Secrets, hooks, and future encounters…"></textarea><button id="savePrivateNotes" class="btn primary">Save private notes</button><p id="privateNoteStatus" role="status"></p></div><div class="card"><h3>Encounter builder</h3><form id="npcForm" class="vstack gap-8"><label class="field"><span>Creature preset</span><select id="npcPreset"><option>Goblin</option><option>Wolf</option><option>Ogre</option><option>Bandit</option></select></label><label class="field"><span>Custom name (optional)</span><input id="npcName" maxlength="24" placeholder="Goblin lookout"></label><button class="btn">Add creature</button></form><div id="npcList"></div></div><div class="card"><h3>Map templates</h3><p class="muted">Generate a new map; this replaces walls and tokens.</p><select id="mapTemplate"><option value="forest">Forest trail</option><option value="dungeon">Dungeon crossroads</option><option value="courtyard">Walled courtyard</option></select><button id="generateMap" class="btn">Generate map</button></div></div></div>
         <!-- Campaign -->
         <div id="campTab" class="panel-body">
           <div class="grid cols-1 cols-2@lg gap-12">
@@ -244,7 +254,7 @@
             </div>
 
             <div id="gmTools" class="card gm-tools" style="display:none;">
-              <h3 class="section-title">GM Tools</h3>
+              <h3 class="section-title">GM Tools</h3><button id="exportCampaign" class="btn ghost">Export Campaign</button><label class="field"><span>Import campaign JSON</span><input id="importCampaign" type="file" accept="application/json,.json"></label>
               <div class="vstack gap-12">
                 <div class="hstack gap-8">
                   <input id="campTitle" class="grow" placeholder="Campaign Title" />
@@ -291,14 +301,14 @@
     </main>
 
     <footer class="footer">
-      <div class="muted">Create a lobby with a password to become GM. Build your story with scenes, choices, handouts, and quests.</div>
+      <div class="muted">The first player to create a lobby becomes GM. Add a password to protect the table. Build your story with scenes, choices, handouts, and quests.</div>
     </footer>
 
     <!-- Scripts: load Socket.IO first, then your app (only once each). -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="/client.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
-<script src="/client.js"></script>
+    <script src="/tabletop-client.js"></script>
+
 
   </body>
 </html>
